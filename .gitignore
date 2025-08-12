@@ -52,3 +52,4 @@ rsconnect/
 # ignore saved file
 *.csv
 *.rds
+*.png

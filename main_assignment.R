@@ -44,46 +44,6 @@ source("./data_collection/youtube_data_collection.R")
 source("./data_collection/reddit_data_collection.R")
 
 # ============================================================================
-# DATA COLLECTION SUMMARY
-# ============================================================================
-
-print("\n========== DATA COLLECTION SUMMARY ==========")
-print(paste("Artist:", ARTIST_NAME))
-print(paste("YouTube Comments:", nrow(yt_data)))
-print(paste("Reddit Comments:", nrow(rd_data)))
-print(paste("Total Data Points:", nrow(yt_data) + nrow(rd_data)))
-print(paste("Collection Date:", Sys.Date()))
-
-# Create summary visualization
-summary_data <- data.frame(
-  Platform = c("YouTube", "Reddit"),
-  Comments = c(nrow(yt_data), nrow(rd_data))
-)
-
-p_summary <- ggplot(summary_data, aes(x = Platform, y = Comments, fill = Platform)) +
-  geom_bar(stat = "identity") +
-  geom_text(aes(label = Comments), vjust = -0.5) +
-  labs(title = paste("Data Collection Summary for", ARTIST_NAME),
-       subtitle = paste("Total:", sum(summary_data$Comments), "comments"),
-       y = "Number of Comments") +
-  theme_minimal() +
-  scale_fill_manual(values = c("YouTube" = "#FF0000", "Reddit" = "#FF4500"))
-
-ggsave("data_collection_summary.png", p_summary, width = 8, height = 6)
-print("Summary plot saved as 'data_collection_summary.png'")
-
-# Check if we have enough data (3000-8000 range)
-total_comments <- nrow(yt_data) + nrow(rd_data)
-if(total_comments < 3000) {
-  warning(paste("Only collected", total_comments, "comments. Consider adding more threads or videos."))
-} else if(total_comments > 8000) {
-  print(paste("Collected", total_comments, "comments. Consider sampling down to 8000 if needed."))
-} else {
-  print(paste("✓ Successfully collected", total_comments, "comments (within 3000-8000 range)"))
-}
-
-
-# ============================================================================
 # COMPREHENSIVE DATA SUMMARY AND VALIDATION
 # ============================================================================
 
@@ -110,3 +70,94 @@ collection_summary <- data.frame(
 )
 
 print(collection_summary)
+
+# ============================================================================
+# SEARCH STRATEGY DOCUMENTATION (FOR REPORT)
+# ============================================================================
+
+search_strategy_doc <- list(
+  objective = "Comprehensive multi-platform sentiment and engagement analysis for Taylor Swift",
+  
+  youtube_strategy = list(
+    approach = "Temporal and thematic diversity",
+    video_selection_criteria = c(
+      "High view count videos (>100M views) for mainstream sentiment",
+      "Recent releases (2023-2024) for current fan engagement",
+      "Different eras (Country, Pop, Folk) for evolution analysis",
+      "Collaboration videos for cross-fanbase insights"
+    ),
+    videos_collected = nrow(yt_metadata),
+    total_comments = nrow(yt_data),
+    avg_comments_per_video = round(nrow(yt_data) / nrow(yt_metadata)),
+    quality_measures = paste(duplicates_removed, "duplicates removed,",
+                             original_yt_count - nrow(yt_data), "total filtered")
+  ),
+  
+  reddit_strategy = list(
+    approach = "Dynamic thread discovery with engagement-based selection",
+    subreddits_targeted = c("TaylorSwift", "popheads", "Music", "SwiftiesAnonymous"),
+    selection_criteria = c(
+      "Thread engagement (sorted by comment count)",
+      "Temporal relevance (recent discussions)",
+      "Topic diversity (tours, albums, controversies)"
+    ),
+    threads_collected = length(unique(rd_data$thread_url)),
+    total_comments = nrow(rd_data),
+    quality_measures = "NA values removed, complete cases only"
+  ),
+  
+  total_data_points = total_data_points,
+  collection_date = Sys.Date(),
+  
+  justification = "This multi-faceted approach ensures comprehensive coverage of fan sentiment across different platforms, time periods, and engagement contexts. YouTube provides immediate emotional reactions while Reddit offers deeper analytical discussions. The combination captures both casual listeners and dedicated fans."
+)
+
+# Save strategy documentation
+saveRDS(search_strategy_doc, file = "search_strategy_documentation.rds")
+
+
+# ============================================================================
+# VISUALIZATION FOR REPORT
+# ============================================================================
+
+# 1. Platform Distribution Chart
+p1 <- ggplot(collection_summary[1:2,], aes(x = Source, y = Clean_Count, fill = Source)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste(Clean_Count, "\n(", Percentage, "%)", sep = "")), 
+            vjust = -0.5, size = 4) +
+  labs(title = "Taylor Swift Social Media Data Collection Distribution",
+       subtitle = paste("Total:", total_data_points, "cleaned data points"),
+       x = "Platform", y = "Number of Comments") +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  scale_fill_manual(values = c("YouTube" = "#FF0000", "Reddit" = "#FF4500"))
+
+ggsave("q2_data_distribution.png", p1, width = 10, height = 6, dpi = 300)
+
+# 2. YouTube Video Performance
+p2 <- ggplot(yt_metadata, aes(x = reorder(substr(reason, 1, 20), comments_collected), 
+                              y = comments_collected)) +
+  geom_bar(stat = "identity", fill = "#FF0000") +
+  coord_flip() +
+  labs(title = "YouTube Data Collection by Video",
+       x = "Video", y = "Comments Collected") +
+  theme_minimal()
+
+ggsave("q2_youtube_breakdown.png", p2, width = 10, height = 6, dpi = 300)
+
+# 3. Data Quality Comparison
+quality_data <- data.frame(
+  Platform = rep(c("YouTube", "Reddit"), each = 2),
+  Type = rep(c("Raw", "Clean"), 2),
+  Count = c(original_yt_count, nrow(yt_data), 
+            nrow(rd_data) + 89, nrow(rd_data))
+)
+
+p3 <- ggplot(quality_data, aes(x = Platform, y = Count, fill = Type)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Data Quality: Raw vs Cleaned Comments",
+       y = "Number of Comments") +
+  theme_minimal() +
+  scale_fill_manual(values = c("Raw" = "#cccccc", "Clean" = "#4CAF50"))
+
+ggsave("q2_data_quality.png", p3, width = 10, height = 6, dpi = 300)

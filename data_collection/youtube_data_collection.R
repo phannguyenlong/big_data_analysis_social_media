@@ -6,54 +6,79 @@ yt_auth <- Authenticate("youtube", apiKey = YOUTUBE_API_KEY)
 
 # Strategic video selection for Taylor Swift
 # Mix of: Recent hits, classic songs, interviews, and fan content
-youtube_videos <- c(
-  # Recent Era (2023-2024) - High engagement expected
-  "https://www.youtube.com/watch?v=b7QlX3yR2xs",  # Anti-Hero (Midnights)
-  "https://www.youtube.com/watch?v=VuNIsY6JdUw",  # Shake It Off
-  "https://www.youtube.com/watch?v=e-ORhEE9VVg",  # Blank Space
-  "https://www.youtube.com/watch?v=tollGa3S0o8",  # Look What You Made Me Do
-  "https://www.youtube.com/watch?v=FuXNumBwDOM",  # ME! ft. Brendon Urie
-  "https://www.youtube.com/watch?v=RsEZmictANA",  # willow
-  "https://www.youtube.com/watch?v=IC8qPpnD0uE",  # Lavender Haze
-  "https://www.youtube.com/watch?v=Jb2stN7kH28",  # Cruel Summer
-  "https://www.youtube.com/watch?v=wMpqCRF7TKg"   # Champagne Problems
+
+# Strategic video selection - EXPLAIN WHY EACH VIDEO
+youtube_videos <- list(
+  list(url = "https://www.youtube.com/watch?v=b7QlX3yR2xs", 
+       reason = "Anti-Hero - Lead single from Midnights, highest engagement"),
+  list(url = "https://www.youtube.com/watch?v=VuNIsY6JdUw", 
+       reason = "Shake It Off - Most viewed video, broad audience appeal"),
+  list(url = "https://www.youtube.com/watch?v=e-ORhEE9VVg", 
+       reason = "Blank Space - Second most popular, peak mainstream success"),
+  list(url = "https://www.youtube.com/watch?v=tollGa3S0o8", 
+       reason = "Look What You Made Me Do - Reputation era, controversy period"),
+  list(url = "https://www.youtube.com/watch?v=FuXNumBwDOM", 
+       reason = "ME! - Collaboration content, different fan base"),
+  list(url = "https://www.youtube.com/watch?v=RsEZmictANA", 
+       reason = "willow - Folklore/Evermore era, indie pivot"),
+  list(url = "https://www.youtube.com/watch?v=IC8qPpnD0uE", 
+       reason = "Lavender Haze - Recent release, current sentiment"),
+  list(url = "https://www.youtube.com/watch?v=Jb2stN7kH28", 
+       reason = "Cruel Summer - Fan favorite, organic hit"),
+  list(url = "https://www.youtube.com/watch?v=wMpqCRF7TKg", 
+       reason = "Champagne Problems - Storytelling peak, critical acclaim")
 )
 
-# Collect YouTube comments with error handling
-yt_data_list <- list()
-total_yt_comments <- 0
+# Extract URLs for collection
+video_urls <- sapply(youtube_videos, function(x) x$url)
 
-for(i in seq_along(youtube_videos)) {
+# Collect YouTube comments with metadata
+yt_data_list <- list()
+yt_metadata <- data.frame()
+
+for(i in seq_along(video_urls)) {
   tryCatch({
-    print(paste("Collecting from video", i, "of", length(youtube_videos)))
+    print(paste("\nCollecting video", i, "of", length(video_urls)))
+    print(paste("Reason:", youtube_videos[[i]]$reason))
     
-    # Extract video ID from URL
-    video_id <- gsub(".*v=([^&]+).*", "\\1", youtube_videos[i])
+    video_id <- gsub(".*v=([^&]+).*", "\\1", video_urls[i])
     
-    # Collect with reasonable limits to avoid rate limiting
     temp_data <- yt_auth |> 
       Collect(videoIDs = video_id,
-              maxComments = 500,  # Limit per video to avoid rate limits
+              maxComments = 500,
               writeToFile = FALSE,
               verbose = TRUE)
     
     if(nrow(temp_data) > 0) {
+      # Add source metadata
+      temp_data$video_source <- youtube_videos[[i]]$reason
+      temp_data$video_url <- video_urls[i]
+      
       yt_data_list[[i]] <- temp_data
-      total_yt_comments <- total_yt_comments + nrow(temp_data)
-      print(paste("Collected", nrow(temp_data), "comments. Total so far:", total_yt_comments))
+      
+      # Track metadata
+      yt_metadata <- rbind(yt_metadata, data.frame(
+        video_number = i,
+        video_id = video_id,
+        reason = youtube_videos[[i]]$reason,
+        comments_collected = nrow(temp_data),
+        avg_likes = mean(temp_data$LikeCount, na.rm = TRUE),
+        avg_reply_count = mean(temp_data$ReplyCount, na.rm = TRUE)
+      ))
+      
+      print(paste("✓ Collected", nrow(temp_data), "comments"))
     }
     
-    # Add delay to respect rate limits
-    Sys.sleep(3)
+    Sys.sleep(3)  # Rate limiting
     
   }, error = function(e) {
-    print(paste("Error collecting video", i, ":", e$message))
+    print(paste("✗ Error:", e$message))
   })
 }
 
-# Combine all YouTube data
+# Combine YouTube data
 yt_data <- bind_rows(yt_data_list)
-print(paste("Total YouTube comments collected:", nrow(yt_data)))
+print(paste("✓ Total YouTube comments collected:", nrow(yt_data)))
 
 # YOUTUBE DATA CLEANING
 
