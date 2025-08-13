@@ -80,7 +80,9 @@ for(i in seq_along(video_urls)) {
 yt_data <- bind_rows(yt_data_list)
 print(paste("✓ Total YouTube comments collected:", nrow(yt_data)))
 
+# ============================================================================
 # YOUTUBE DATA CLEANING
+# ============================================================================
 
 # Store original count
 original_yt_count <- nrow(yt_data)

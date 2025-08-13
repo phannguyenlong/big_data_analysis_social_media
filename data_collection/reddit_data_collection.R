@@ -134,7 +134,7 @@ print(paste("Selected", length(reddit_threads), "threads for data collection"))
 rd_data_list <- list()
 total_rd_comments <- 0
 
-for(i in 1:length(reddit_threads)) {
+for(i in seq_along(reddit_threads)) {
   tryCatch({
     print(paste("\nCollecting Reddit thread", i, "of", length(reddit_threads)))
     print(paste("URL:", reddit_threads[i]))
@@ -170,18 +170,107 @@ for(i in 1:length(reddit_threads)) {
 rd_data <- bind_rows(rd_data_list)
 print(paste("\nTotal Reddit comments collected:", nrow(rd_data)))
 
-# Remove NA values
+# ============================================================================
+# ENHANCED REDDIT DATA CLEANING (Matching YouTube Standards)
+# ============================================================================
+
+print("\n========== REDDIT DATA CLEANING ==========")
+
+# Store original count
+original_rd_count <- nrow(rd_data)
+
+# 1. Remove NA values (already done but let's ensure)
 rd_data <- rd_data[complete.cases(rd_data$comment), ]
-print(paste("Reddit comments after removing NAs:", nrow(rd_data)))
+na_removed <- original_rd_count - nrow(rd_data)
 
-# Save Reddit data with metadata
-saveRDS(rd_data, file = "taylor_swift_reddit_data.rds")
-write.csv(rd_data, file = "taylor_swift_reddit_data.csv", row.names = FALSE)
+# 2. Remove duplicate comments
+before_dedupe <- nrow(rd_data)
+rd_data <- rd_data[!duplicated(rd_data$comment), ]
+duplicates_removed <- before_dedupe - nrow(rd_data)
 
-# Save thread list for documentation
-thread_metadata <- data.frame(
-  thread_number = 1:length(reddit_threads),
-  thread_url = reddit_threads,
-  collection_date = Sys.Date()
+# 3. Comprehensive text cleaning (same as YouTube)
+clean_comment <- function(x) {
+  if (length(x) == 0 || is.na(x)) return(NA_character_)
+  x <- as.character(x)
+  y <- x |>
+    textclean::replace_url() |>
+    textclean::replace_html() |>
+    textclean::replace_non_ascii() |>
+    textclean::replace_word_elongation() |>
+    textclean::replace_internet_slang() |>
+    textclean::replace_contraction() |>
+    textclean::replace_emoji(replacement = "") |>
+    textclean::replace_emoticon(replacement = "")
+  if (length(y) != 1) y <- paste(y, collapse = " ")
+  y
+}
+
+rd_data$comment_clean <- vapply(
+  rd_data$comment,
+  function(x) {
+    x_vec <- unlist(x, use.names = FALSE)
+    x_chr <- paste(as.character(x_vec), collapse = " ")
+    trimws(clean_comment(x_chr))
+  },
+  FUN.VALUE = character(1),
+  USE.NAMES = FALSE
 )
-write.csv(thread_metadata, file = "reddit_threads_collected.csv", row.names = FALSE)
+
+# 4. Remove deleted/removed comments
+rd_data <- rd_data[!grepl("^\\[deleted\\]$|^\\[removed\\]$", rd_data$comment_clean, ignore.case = TRUE), ]
+
+# 5. Remove bot comments (common bot patterns)
+bot_patterns <- c(
+  "I am a bot",
+  "^RemindMe!",
+  "^!RemindMe",
+  "This is an automated",
+  "^Your submission has been removed"
+)
+bot_pattern <- paste(bot_patterns, collapse = "|")
+rd_data <- rd_data[!grepl(bot_pattern, rd_data$comment_clean, ignore.case = TRUE), ]
+
+# 6. Remove very short comments (less than 3 words or 10 characters)
+rd_data <- rd_data[nchar(rd_data$comment_clean) >= 10, ]
+rd_data <- rd_data[lengths(strsplit(rd_data$comment_clean, "\\s+")) >= 3, ]
+
+# 7. Remove excessive quote replies (comments that are mostly quotes)
+# If more than 70% of comment is quoted text (starting with >)
+quote_ratio <- sapply(rd_data$comment_clean, function(x) {
+  lines <- strsplit(x, "\n")[[1]]
+  quoted_lines <- sum(grepl("^>", trimws(lines)))
+  total_lines <- length(lines)
+  if(total_lines > 0) quoted_lines/total_lines else 0
+})
+rd_data <- rd_data[quote_ratio < 0.7, ]
+
+# 8. Reddit-specific: Remove AutoModerator comments
+rd_data <- rd_data[rd_data$author != "AutoModerator", ]
+
+# Calculate cleaning statistics
+final_rd_count <- nrow(rd_data)
+total_removed <- original_rd_count - final_rd_count
+
+print(paste("Reddit Data Cleaning Summary:"))
+print(paste("  Original comments:", original_rd_count))
+print(paste("  NA values removed:", na_removed))
+print(paste("  Duplicates removed:", duplicates_removed))
+print(paste("  Deleted/Bot/Short removed:", total_removed - na_removed - duplicates_removed))
+print(paste("  Final clean comments:", final_rd_count))
+print(paste("  Data quality improvement:", round((total_removed/original_rd_count)*100, 2), "% removed"))
+
+# Additional quality metrics
+rd_data$comment_length <- nchar(rd_data$comment_clean)
+rd_data$word_count <- lengths(strsplit(rd_data$comment_clean, "\\s+"))
+
+print(paste("\nReddit Comment Quality Metrics:"))
+print(paste("  Average comment length:", round(mean(rd_data$comment_length), 0), "characters"))
+print(paste("  Median comment length:", median(rd_data$comment_length), "characters"))
+print(paste("  Average word count:", round(mean(rd_data$word_count), 0), "words"))
+print(paste("  Longest comment:", max(rd_data$comment_length), "characters"))
+print(paste("  Shortest comment:", min(rd_data$comment_length), "characters"))
+
+# Save cleaned Reddit data
+saveRDS(rd_data, file = "reddit_data_clean.rds")
+write.csv(rd_data, file = "reddit_data_clean.csv", row.names = FALSE)
+
