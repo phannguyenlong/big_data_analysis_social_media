@@ -72,51 +72,6 @@ collection_summary <- data.frame(
 print(collection_summary)
 
 # ============================================================================
-# SEARCH STRATEGY DOCUMENTATION (FOR REPORT)
-# ============================================================================
-
-search_strategy_doc <- list(
-  objective = "Comprehensive multi-platform sentiment and engagement analysis for Taylor Swift",
-  
-  youtube_strategy = list(
-    approach = "Temporal and thematic diversity",
-    video_selection_criteria = c(
-      "High view count videos (>100M views) for mainstream sentiment",
-      "Recent releases (2023-2024) for current fan engagement",
-      "Different eras (Country, Pop, Folk) for evolution analysis",
-      "Collaboration videos for cross-fanbase insights"
-    ),
-    videos_collected = nrow(yt_metadata),
-    total_comments = nrow(yt_data),
-    avg_comments_per_video = round(nrow(yt_data) / nrow(yt_metadata)),
-    quality_measures = paste(duplicates_removed, "duplicates removed,",
-                             original_yt_count - nrow(yt_data), "total filtered")
-  ),
-  
-  reddit_strategy = list(
-    approach = "Dynamic thread discovery with engagement-based selection",
-    subreddits_targeted = c("TaylorSwift", "popheads", "Music", "SwiftiesAnonymous"),
-    selection_criteria = c(
-      "Thread engagement (sorted by comment count)",
-      "Temporal relevance (recent discussions)",
-      "Topic diversity (tours, albums, controversies)"
-    ),
-    threads_collected = length(unique(rd_data$thread_url)),
-    total_comments = nrow(rd_data),
-    quality_measures = "NA values removed, complete cases only"
-  ),
-  
-  total_data_points = total_data_points,
-  collection_date = Sys.Date(),
-  
-  justification = "This multi-faceted approach ensures comprehensive coverage of fan sentiment across different platforms, time periods, and engagement contexts. YouTube provides immediate emotional reactions while Reddit offers deeper analytical discussions. The combination captures both casual listeners and dedicated fans."
-)
-
-# Save strategy documentation
-saveRDS(search_strategy_doc, file = "search_strategy_documentation.rds")
-
-
-# ============================================================================
 # VISUALIZATION FOR REPORT
 # ============================================================================
 
