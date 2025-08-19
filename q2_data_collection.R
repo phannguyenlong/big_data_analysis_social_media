@@ -157,3 +157,16 @@ print(paste("\nTotal Reddit comments collected after N/A removed:", nrow(rd_data
 # save it
 saveRDS(rd_data, file = ".//rd_data.rds")
 write.csv(rd_data, file = ".//rd_data.csv")
+
+# ============================================================================
+# COMPREHENSIVE DATA SUMMARY AND VALIDATION
+# ============================================================================
+
+print("\n========== DATA COLLECTION SUMMARY ==========")
+
+# Calculate totals
+total_data_points <- nrow(yt_data) + nrow(rd_data)
+
+print(paste("✓ Total YouTube comments collected:", nrow(yt_data)))
+print(paste("✓ Total Reddit comments collected:", nrow(rd_data)))
+print(paste("✓ Total Data points: ", total_data_points))
