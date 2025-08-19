@@ -33,86 +33,57 @@ library(spotifyr)
 library(RedditExtractoR)
 library(httr)
 
-# ============================================================================
-# DATA COLLECTION FROM YOUTUBE AND REDDIT
-# ============================================================================
-
-#=======================YOUTUBE DATA COLLECTION=======================
-source("./data_collection/youtube_data_collection.R")
-
-#=======================DYNAMIC REDDIT DATA COLLECTION=======================
-source("./data_collection/reddit_data_collection.R")
+# load utils
+source("./utils.R")
 
 # ============================================================================
-# COMPREHENSIVE DATA SUMMARY AND VALIDATION
+# QUESTION 2: DATA COLLECTION FROM YOUTUBE AND REDDIT
 # ============================================================================
 
-print("\n========== DATA COLLECTION SUMMARY ==========")
-
-# Calculate totals
-total_data_points <- nrow(yt_data) + nrow(rd_data)
-
-# Create detailed summary
-collection_summary <- data.frame(
-  Source = c("YouTube", "Reddit", "Total"),
-  Raw_Count = c(original_yt_count, nrow(rd_data) + 89, original_yt_count + nrow(rd_data) + 89),
-  Clean_Count = c(nrow(yt_data), nrow(rd_data), total_data_points),
-  Percentage = c(
-    round(nrow(yt_data)/total_data_points * 100, 2),
-    round(nrow(rd_data)/total_data_points * 100, 2),
-    100
-  ),
-  Avg_Length = c(
-    round(mean(nchar(yt_data$Comment_Clean), na.rm = TRUE)),
-    round(mean(nchar(rd_data$comment), na.rm = TRUE)),
-    NA
-  )
-)
-
-print(collection_summary)
+source("./q2_data_collection.R")
 
 # ============================================================================
-# VISUALIZATION FOR REPORT
+# QUESTION 3: Create actor network
 # ============================================================================
+# Youtube Actor Graph ------------------------------------------------------
+# Load YouTube data
+yt_data <- readRDS("yt_data.rds")
+# Create actor network 
+yt_actor_network <- yt_data |> 
+  Create("actor") |> 
+  AddText(yt_data,
+          repliesFromText = TRUE,
+          verbose = TRUE) |> 
+  AddVideoData(yt_auth,
+               actorSubOnly = TRUE,
+               verbose = TRUE)
 
-# 1. Platform Distribution Chart
-p1 <- ggplot(collection_summary[1:2,], aes(x = Source, y = Clean_Count, fill = Source)) +
-  geom_bar(stat = "identity") +
-  geom_text(aes(label = paste(Clean_Count, "\n(", Percentage, "%)", sep = "")), 
-            vjust = -0.5, size = 4) +
-  labs(title = "Taylor Swift Social Media Data Collection Distribution",
-       subtitle = paste("Total:", total_data_points, "cleaned data points"),
-       x = "Platform", y = "Number of Comments") +
-  theme_minimal() +
-  theme(legend.position = "none") +
-  scale_fill_manual(values = c("YouTube" = "#FF0000", "Reddit" = "#FF4500"))
+# Create graph from the network and change IDs to screen names
+yt_actor_graph <- yt_actor_network |> Graph()
+V(yt_actor_graph)$name <- V(yt_actor_graph)$screen_name
+plot(yt_actor_graph)
 
-ggsave("q2_data_distribution.png", p1, width = 10, height = 6, dpi = 300)
+# Save and write graph to file
+saveRDS(yt_actor_graph, file = "YouTubeActor.rds")
+write_graph(yt_actor_graph, file = "YouTubeActor.graphml", format = "graphml")
 
-# 2. YouTube Video Performance
-p2 <- ggplot(yt_metadata, aes(x = reorder(substr(reason, 1, 20), comments_collected), 
-                              y = comments_collected)) +
-  geom_bar(stat = "identity", fill = "#FF0000") +
-  coord_flip() +
-  labs(title = "YouTube Data Collection by Video",
-       x = "Video", y = "Comments Collected") +
-  theme_minimal()
+# Reddit Actor Graph ------------------------------------------------------
+# Load Reddit data
+rd_data <- readRDS("rd_data.rds")
+# Create actor network 
+rd_actor_network <- rd_data |> 
+  Create("actor") |> 
+  AddText(rd_data,
+          verbose = TRUE) 
 
-ggsave("q2_youtube_breakdown.png", p2, width = 10, height = 6, dpi = 300)
+# Create graph from the network
+rd_actor_graph <- rd_actor_network |> Graph()
+rd_actor_graph
+V(rd_actor_graph)$name <- V(rd_actor_graph)$user
+rd_actor_graph
+plot(rd_actor_graph)
 
-# 3. Data Quality Comparison
-quality_data <- data.frame(
-  Platform = rep(c("YouTube", "Reddit"), each = 2),
-  Type = rep(c("Raw", "Clean"), 2),
-  Count = c(original_yt_count, nrow(yt_data), 
-            nrow(rd_data) + 89, nrow(rd_data))
-)
+# Save and write graph to file
+saveRDS(rd_actor_graph, file = "RedditActor.rds")
+write_graph(rd_actor_graph, file = "RedditActor.graphml", format = "graphml")
 
-p3 <- ggplot(quality_data, aes(x = Platform, y = Count, fill = Type)) +
-  geom_bar(stat = "identity", position = "dodge") +
-  labs(title = "Data Quality: Raw vs Cleaned Comments",
-       y = "Number of Comments") +
-  theme_minimal() +
-  scale_fill_manual(values = c("Raw" = "#cccccc", "Clean" = "#4CAF50"))
-
-ggsave("q2_data_quality.png", p3, width = 10, height = 6, dpi = 300)

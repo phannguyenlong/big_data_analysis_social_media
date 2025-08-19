@@ -129,5 +129,5 @@ print(paste("✓ Data quality improved by removing",
             original_yt_count - nrow(yt_data), "low-quality entries"))
 
 # Save YouTube data
-saveRDS(yt_data, file = "taylor_swift_youtube_data.rds")
-write.csv(yt_data, file = "taylor_swift_youtube_data.csv", row.names = FALSE)
+saveRDS(yt_data, file = "youtube_data_clean.rds")
+write.csv(yt_data, file = "youtube_data_clean.csv", row.names = FALSE)

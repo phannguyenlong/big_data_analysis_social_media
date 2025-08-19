@@ -100,7 +100,7 @@ get_multi_subreddit_threads <- function(artist_name) {
     if(length(threads) > 0) {
       all_threads <- c(all_threads, threads)
     }
-    Sys.sleep(2)  # Be respectful to Reddit's servers
+    Sys.sleep(2)  # Delay to prevent rate limit
   }
   
   # Remove duplicates
