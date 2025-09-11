@@ -6,25 +6,25 @@
 
 preprocess_to_corpus <- function(text_vector) {
   cleaned <- text_vector |>
-    replace_url() |>
-    replace_html() |>
-    replace_non_ascii() |>
-    replace_word_elongation() |>
-    replace_internet_slang() |>
-    replace_contraction() |>
-    removeNumbers() |>
-    removePunctuation() |>
-    replace_emoji() |>
-    replace_emoticon()
+    textclean::replace_url() |>
+    textclean::replace_html() |>
+    textclean::replace_non_ascii() |>
+    textclean::replace_word_elongation() |>
+    textclean::replace_internet_slang() |>
+    textclean::replace_contraction() |>
+    tm::removeNumbers() |>
+    tm::removePunctuation() |>
+    textclean::replace_emoji() |>
+    textclean::replace_emoticon()
 
-  VCorpus(VectorSource(cleaned)) |>
-    tm_map(content_transformer(tolower)) |>
-    tm_map(removeWords, stopwords(kind = "SMART")) |>
-    tm_map(stripWhitespace)
+  tm::VCorpus(tm::VectorSource(cleaned)) |>
+    tm::tm_map(tm::content_transformer(tolower)) |>
+    tm::tm_map(tm::removeWords, tm::stopwords(kind = "SMART")) |>
+    tm::tm_map(tm::stripWhitespace)
 }
 
 build_term_frequency <- function(corpus) {
-  dtm <- DocumentTermMatrix(corpus)
+  dtm <- tm::DocumentTermMatrix(corpus)
   dtm_df <- as.data.frame(as.matrix(dtm))
   sort(colSums(dtm_df), decreasing = TRUE)
 }
@@ -33,6 +33,13 @@ write_top_terms_csv <- function(freq, out_path, top_n = 10) {
   n <- min(top_n, length(freq))
   df <- data.frame(term = names(freq)[1:n], frequency = as.integer(freq[1:n]))
   utils::write.csv(df, out_path, row.names = FALSE)
+}
+
+corpus_from_clean <- function(cleaned_text) {
+  tm::VCorpus(tm::VectorSource(cleaned_text)) |>
+    tm::tm_map(tm::content_transformer(tolower)) |>
+    tm::tm_map(tm::removeWords, tm::stopwords(kind = "SMART")) |>
+    tm::tm_map(tm::stripWhitespace)
 }
 
 # ============================================================================
@@ -47,7 +54,23 @@ rd_data <- readRDS(paste(dataset_dir,"rd_data.rds",sep=""))
 rd_data <- rd_data[complete.cases(rd_data), ]
 
 # Build corpus and term frequency
-rd_corpus <- preprocess_to_corpus(rd_data$comment)
+rd_clean_text <- rd_data$comment |>
+  textclean::replace_url() |>
+  textclean::replace_html() |>
+  textclean::replace_non_ascii() |>
+  textclean::replace_word_elongation() |>
+  textclean::replace_internet_slang() |>
+  textclean::replace_contraction() |>
+  tm::removeNumbers() |>
+  tm::removePunctuation() |>
+  textclean::replace_emoji() |>
+  textclean::replace_emoticon()
+
+# Save cleaned Reddit text for reuse (Q7)
+saveRDS(rd_clean_text, paste(dataset_dir, "rd_clean_text.rds", sep = ""))
+utils::write.csv(data.frame(text = rd_clean_text), paste(dataset_dir, "rd_clean_text.csv", sep = ""), row.names = FALSE)
+
+rd_corpus <- corpus_from_clean(rd_clean_text)
 rd_freq <- build_term_frequency(rd_corpus)
 
 # Show and save top 10
@@ -77,7 +100,23 @@ yt_data <- readRDS(paste(dataset_dir,"yt_data.rds",sep=""))
 yt_data <- yt_data[complete.cases(yt_data), ]
 
 # Build corpus and term frequency
-yt_corpus <- preprocess_to_corpus(yt_data$Comment)
+yt_clean_text <- yt_data$Comment |>
+  textclean::replace_url() |>
+  textclean::replace_html() |>
+  textclean::replace_non_ascii() |>
+  textclean::replace_word_elongation() |>
+  textclean::replace_internet_slang() |>
+  textclean::replace_contraction() |>
+  tm::removeNumbers() |>
+  tm::removePunctuation() |>
+  textclean::replace_emoji() |>
+  textclean::replace_emoticon()
+
+# Save cleaned YouTube text for reuse
+saveRDS(yt_clean_text, paste(dataset_dir, "yt_clean_text.rds", sep = ""))
+utils::write.csv(data.frame(text = yt_clean_text), paste(dataset_dir, "yt_clean_text.csv", sep = ""), row.names = FALSE)
+
+yt_corpus <- corpus_from_clean(yt_clean_text)
 yt_freq <- build_term_frequency(yt_corpus)
 
 # Show and save top 10
