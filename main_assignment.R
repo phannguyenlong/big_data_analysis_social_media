@@ -10,6 +10,10 @@
 # set working directory
 setwd("D://Long_Document//Griffith//Tri2_2025//Big_Data_and_Social_Media//assignment//big_data_analysis_social_media")
 
+# other config
+graph_dir <- ".//graphs//"
+dataset_dir <- ".//data//"
+
 # Choose Artist 
 ARTIST_NAME <- "Taylor Swift"  # Change this to your chosen artist
 SPOTIFY_ARTIST_ID <- "06HL4z0CvFAxyc27GXpf02"  # Find this from Spotify
@@ -48,4 +52,9 @@ source("./q2_data_collection.R")
 # ============================================================================
 
 source("./q3_actor_network.R")
-# do we need to create semetic graph for this question
+# do we need to create Semantic graph for this question
+
+# ============================================================================
+# QUESTION 4: Unique actor
+# ============================================================================
+# how to do this

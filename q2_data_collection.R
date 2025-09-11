@@ -91,8 +91,8 @@ print(paste("✓ Total YouTube comments collected:", nrow(yt_data)))
 print(paste("✓ Total YouTube comments collected after N/A removed:", nrow(yt_data)))
 
 # save it
-saveRDS(yt_data, file = ".//yt_data.rds")
-write.csv(yt_data, file = ".//yt_data.csv")
+saveRDS(yt_data, file = paste(dataset_dir,".//yt_data.rds",sep=""))
+write.csv(yt_data, file = paste(dataset_dir,".//yt_data.csv",sep=""))
 
 #=======================REDDIT DATA COLLECTION=======================
 # Authenticate Reddit (no credentials needed for vosonSML)
@@ -155,8 +155,8 @@ rd_data <- rd_data[complete.cases(rd_data), ]
 print(paste("\nTotal Reddit comments collected after N/A removed:", nrow(rd_data)))
 
 # save it
-saveRDS(rd_data, file = ".//rd_data.rds")
-write.csv(rd_data, file = ".//rd_data.csv")
+saveRDS(rd_data, file = paste(dataset_dir,".//rd_data.rds",sep=""))
+write.csv(rd_data, file = paste(dataset_dir,".//rd_data.csv",sep=""))
 
 # ============================================================================
 # COMPREHENSIVE DATA SUMMARY AND VALIDATION
