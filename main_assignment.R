@@ -92,7 +92,7 @@ source("./q7_sementic_bigram.R")
 source("./q8_centrality.R")
 
 # ============================================================================
-# QUESTION 8: community analysis with the Girvan-Newman (edge betweenness) and Louvain methods
+# QUESTION 9: community analysis with the Girvan-Newman (edge betweenness) and Louvain methods
 # ============================================================================
 source("./q9_community_analysis.R")
 

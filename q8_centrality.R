@@ -71,3 +71,62 @@ if (file.exists(yt_path)) {
 } else {
   cat("\nYouTube actor graph not found at ", yt_path, "\n", sep = "")
 }
+
+
+
+# ==================================================
+# Visualization
+# ==================================================
+
+# CODE FOR FIGURE 1: Centrality comparison visualization
+library(ggplot2)
+library(tidyr)
+
+# Create centrality comparison data
+centrality_data <- data.frame(
+  User = c("PassionateAsSin", "Lyd_Euh", "aran130711",
+           "TaylorSwiftVEVO", "justintimberlakeVEVO", "@Christina-y5s"),
+  Platform = c(rep("Reddit", 3), rep("YouTube", 3)),
+  Degree = c(1651, 672, 425, 4014, 502, 66),
+  Betweenness = c(2674047, 1369532, 277825, 8395247, 1990641, 76243) / 100000, # Scale for visualization
+  Closeness = c(0.0001784, 0.0001439, 0.0001439, 0.0001815, 0.0001162, 0.0001041) * 10000 # Scale for visualization
+)
+
+# Reshape for plotting
+centrality_long <- pivot_longer(centrality_data, 
+                                cols = c(Degree, Betweenness, Closeness),
+                                names_to = "Metric", 
+                                values_to = "Score")
+
+p1 <- ggplot(centrality_long, aes(x = User, y = Score, fill = Platform)) +
+  geom_col() +
+  facet_wrap(~Metric, scales = "free_y") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Centrality Measures: Top 3 Users per Platform",
+       subtitle = "Degree (connections), Betweenness (bridge role), Closeness (reach)") +
+  scale_fill_manual(values = c("Reddit" = "#FF4500", "YouTube" = "#FF0000"))
+
+ggsave("q8_figure1_centrality.png", p1, width = 12, height = 6)
+
+# CODE FOR FIGURE 2: Artist comparison
+artist_comparison <- data.frame(
+  Artist = c("TaylorSwiftVEVO", "justintimberlakeVEVO"),
+  Degree = c(4014, 502),
+  Betweenness_Millions = c(8.395, 1.991),
+  Closeness_x10000 = c(1.815, 1.162)
+)
+
+# Create multi-metric comparison
+p2 <- ggplot(artist_comparison) +
+  geom_segment(aes(x = 0, xend = Degree/100, y = Artist, yend = Artist), 
+               size = 10, color = "#1f77b4", alpha = 0.7) +
+  geom_text(aes(x = Degree/100, y = Artist, label = paste("Degree:", Degree)), 
+            hjust = -0.1, size = 3) +
+  labs(title = "Artist Channel Centrality Comparison",
+       subtitle = "TaylorSwiftVEVO dominates all centrality metrics",
+       x = "Centrality Score (normalized)", y = "") +
+  theme_minimal() +
+  xlim(0, 50)
+
+ggsave("q8_figure2_artist_comparison.png", p2, width = 10, height = 4)

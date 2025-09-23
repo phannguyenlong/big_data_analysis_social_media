@@ -63,7 +63,7 @@ if (!is.null(yt_data) && is.data.frame(yt_data) && nrow(yt_data) > 0) {
 if (!is.null(rd_data) && is.data.frame(rd_data) && nrow(rd_data) > 0) {
   rd_author_col <- first_existing_column(
     rd_data,
-    c("author", "user", "User", "screen_name", "AuthorDisplayName")
+    c("user", "User", "screen_name", "author", "AuthorDisplayName")
   )
   if (!is.na(rd_author_col)) {
     rd_authors <- normalize_authors(rd_data[[rd_author_col]])
@@ -138,4 +138,61 @@ cat(paste0("Reddit unique list:  ", rd_list_path, "\n"))
 cat(paste0("Combined unique list: ", combined_list_path, "\n"))
 cat(paste0("Overlap list: ", overlap_list_path, "\n"))
 
+# ==================================================
+# Visualization
+# ==================================================
+
+# Load required libraries
+library(ggplot2)
+library(tidyr)
+
+# Create data frame with the results
+actor_data <- data.frame(
+  Platform = rep(c("YouTube", "Reddit"), each = 2),
+  Metric = rep(c("Unique Actors", "Total Comments"), 2),
+  Count = c(4129, 5076,  # YouTube: unique actors, total comments
+            2865, 4968)  # Reddit: unique actors, total comments
+)
+
+# Create grouped bar chart
+p <- ggplot(actor_data, aes(x = Platform, y = Count, fill = Metric)) +
+  geom_col(position = "dodge", width = 0.7) +
+  geom_text(aes(label = format(Count, big.mark = ",")), 
+            position = position_dodge(width = 0.7), 
+            vjust = -0.5, size = 3.5) +
+  scale_fill_manual(values = c("Unique Actors" = "#1f77b4", 
+                               "Total Comments" = "#ff7f0e")) +
+  scale_y_continuous(expand = c(0, 0), 
+                     limits = c(0, max(actor_data$Count) * 1.1),
+                     labels = scales::comma) +
+  labs(title = "Unique Actors vs Total Comments by Platform",
+       subtitle = "Zero overlap between platforms (0 shared users)",
+       x = "Platform",
+       y = "Count",
+       fill = "Metric") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    plot.subtitle = element_text(size = 11, color = "gray40"),
+    legend.position = "top",
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.y = element_blank()
+  )
+
+# Display the plot
+print(p)
+
+# Save the plot
+ggsave("actor_comparison.png", plot = p, width = 8, height = 6, dpi = 300)
+
+# Alternative: Create a summary table to accompany the visualization
+summary_table <- data.frame(
+  Platform = c("YouTube", "Reddit", "Combined"),
+  `Unique Actors` = c(4129, 2865, 6994),
+  `Total Comments` = c(5076, 4968, 10044),
+  `Comments per Actor` = c(1.23, 1.73, 1.44),
+  `Platform Share` = c("59%", "41%", "100%")
+)
+
+print(summary_table)
 

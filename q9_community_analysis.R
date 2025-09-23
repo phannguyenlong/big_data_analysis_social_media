@@ -14,13 +14,13 @@ safe_length <- function(x) if (is.null(x)) 0 else length(x)
 analyze_communities <- function(g, label, out_dir) {
   if (is.null(g)) return(NULL)
 
-  ug <- igraph::as.undirected(g, mode = "collapse")
+  ug <- igraph::as_undirected(g, mode = "collapse")
   louv <- igraph::cluster_louvain(ug)
   gn <- igraph::cluster_edge_betweenness(ug)
 
   cat("\n========== ", label, " COMMUNITIES =========\n", sep = "")
-  cat("Louvain: ", igraph::length(louv), " communities, modularity=", round(igraph::modularity(louv), 4), "\n", sep="")
-  cat("Girvan-Newman: ", igraph::length(gn), " communities\n", sep="")
+  cat("Louvain: ", length(louv), " communities, modularity=", round(igraph::modularity(louv), 4), "\n", sep="")
+  cat("Girvan-Newman: ", length(gn), " communities\n", sep="")
 
   louv_df <- data.frame(node = igraph::V(ug)$name, community = louv$membership, stringsAsFactors = FALSE)
   gn_df <- data.frame(node = igraph::V(ug)$name, community = gn$membership, stringsAsFactors = FALSE)
@@ -88,3 +88,44 @@ cat("\nNotes:\n")
 cat("- Louvain finds dense groups; Girvan-Newman splits via bridging edges.\n")
 cat("- Relevance: communities around your artist or official channels indicate fan subgroups or topic clusters.\n")
 cat("- Compare related artists: similar community counts/sizes suggest overlapping fandom structures; differences imply distinct sub-communities.\n")
+
+# ==================================================
+# Visualization
+# ==================================================
+
+# CODE FOR FIGURE 1: Enhanced community visualization
+library(ggplot2)
+library(gridExtra)
+
+# Community count comparison
+community_comp <- data.frame(
+  Platform = rep(c("Reddit", "YouTube"), each = 2),
+  Method = rep(c("Louvain", "Girvan-Newman"), 2),
+  Count = c(30, 41, 179, 131)
+)
+
+p1 <- ggplot(community_comp, aes(x = Method, y = Count, fill = Platform)) +
+  geom_col(position = "dodge", width = 0.7) +
+  geom_text(aes(label = Count), position = position_dodge(0.7), vjust = -0.5) +
+  scale_fill_manual(values = c("Reddit" = "#FF4500", "YouTube" = "#FF0000")) +
+  labs(title = "Community Detection: Algorithm Comparison",
+       y = "Number of Communities") +
+  theme_minimal()
+
+# Modularity comparison
+mod_comp <- data.frame(
+  Platform = c("Reddit", "YouTube"),
+  Modularity = c(0.649, 0.370)
+)
+
+p2 <- ggplot(mod_comp, aes(x = Platform, y = Modularity, fill = Platform)) +
+  geom_col(width = 0.5) +
+  geom_text(aes(label = sprintf("%.3f", Modularity)), vjust = -0.5) +
+  geom_hline(yintercept = 0.5, linetype = "dashed", color = "gray50") +
+  annotate("text", x = 1.5, y = 0.52, label = "Strong/Weak threshold", size = 3) +
+  scale_fill_manual(values = c("Reddit" = "#FF4500", "YouTube" = "#FF0000")) +
+  scale_y_continuous(limits = c(0, 0.8)) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+grid.arrange(p1, p2, ncol = 2)

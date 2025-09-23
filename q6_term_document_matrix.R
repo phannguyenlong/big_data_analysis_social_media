@@ -133,3 +133,86 @@ ggplot(yt_plot_df, aes(x = reorder(word, freq), y = freq)) +
   ggtitle("YouTube: Top 10 Terms") +
   xlab("") +
   ylab("Frequency")
+
+# ==================================================
+# Visualization
+# ==================================================
+
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+
+# Create combined dataset
+term_data <- data.frame(
+  Term = c("album", "taylor", "love", "people", "time", "orange", 
+           "laughing", "cover", "podcast", "happy",
+           "song", "taylor", "excuse", "orange", "people", 
+           "laughing", "love", "album", "loud", "songs"),
+  Frequency = c(642, 554, 295, 281, 258, 248, 236, 217, 209, 183,
+                28, 21, 14, 13, 13, 12, 11, 10, 10, 10),
+  Platform = c(rep("Reddit", 10), rep("YouTube", 10)),
+  Rank = c(1:10, 1:10)
+)
+
+# Figure 1: Side-by-side comparison
+p1 <- ggplot(term_data, aes(x = reorder(Term, -Frequency), y = Frequency, fill = Platform)) +
+  geom_col(position = "dodge") +
+  facet_wrap(~Platform, scales = "free") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Top 10 Terms by Platform",
+       x = "Term", y = "Frequency") +
+  scale_fill_manual(values = c("Reddit" = "#FF4500", "YouTube" = "#FF0000"))
+
+ggsave("q6_figure1_terms_comparison.png", p1, width = 10, height = 6)
+
+
+# CODE FOR FIGURE 2: Scatter plot comparison
+common_terms <- c("taylor", "album", "love", "people", "orange", "laughing")
+comparison_data <- term_data %>%
+  filter(Term %in% common_terms) %>%
+  pivot_wider(names_from = Platform, values_from = Frequency, values_fill = 0)
+
+p2 <- ggplot(comparison_data, aes(x = Reddit, y = YouTube, label = Term)) +
+  geom_point(size = 4, color = "#1DB954") +
+  geom_text(vjust = -1, hjust = 0.5, size = 3.5) +
+  labs(title = "Term Frequency: Reddit vs YouTube",
+       subtitle = "Common terms across platforms (diagonal line = equal frequency)",
+       x = "Reddit Frequency", y = "YouTube Frequency") +
+  theme_minimal() +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", alpha = 0.3) +
+  scale_x_continuous(limits = c(0, 650)) +
+  scale_y_continuous(limits = c(0, 30))
+
+ggsave("q6_figure2_correlation.png", p2, width = 8, height = 8)
+
+# CODE FOR FIGURE 3: Word clouds
+library(wordcloud)
+library(RColorBrewer)
+
+# Reproducible layout for word clouds
+set.seed(42)
+
+# Reddit word cloud (all terms)
+png("q6_figure3a_reddit_wordcloud.png", width = 800, height = 600)
+wordcloud(words = names(rd_freq),
+          freq = as.integer(rd_freq),
+          min.freq = 1,
+          max.words = length(rd_freq),
+          random.order = FALSE,
+          colors = brewer.pal(8, "Dark2"),
+          scale = c(5, 0.5))
+title("Reddit: All Terms")
+dev.off()
+
+# YouTube word cloud (all terms)
+png("q6_figure3b_youtube_wordcloud.png", width = 800, height = 600)
+wordcloud(words = names(yt_freq),
+          freq = as.integer(yt_freq),
+          min.freq = 1,
+          max.words = length(yt_freq),
+          random.order = FALSE,
+          colors = brewer.pal(8, "Set2"),
+          scale = c(5, 0.5))
+title("YouTube: All Terms")
+dev.off()
