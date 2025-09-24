@@ -97,4 +97,18 @@ source("./q8_centrality.R")
 source("./q9_community_analysis.R")
 
 
+#########################################################################
+# Machine Learning Models
+#########################################################################
 
+# ============================================================================
+# QUESTION 10: Use sentiment analysis to identify how the public reacts to events 
+# ============================================================================
+source("./q10_sentiment_analysis.R")
+
+save.image(file = "env_backup.RData")
+
+# ============================================================================
+# QUESTION 11: Build a decision tree and evaluate its performance in predicting whether a song is by your artist/band.
+# ============================================================================
+source("./q11_decision_tree.R")

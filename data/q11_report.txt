@@ -1,0 +1,10 @@
+Q11 Decision Tree Report
+Artist: Taylor Swift
+Pos samples: 10, Neg samples: 10, Total: 20
+Features used: duration_ms, popularity, track_number, disc_number, album_year
+
+Baseline (single tree):
+  Accuracy=0.750, Precision_y=0.500, Recall_y=1.000, F1_y=0.667
+
+Boosted (trials=10):
+  Accuracy=0.750, Precision_y=0.500, Recall_y=1.000, F1_y=0.667
