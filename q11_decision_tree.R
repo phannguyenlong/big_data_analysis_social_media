@@ -47,103 +47,11 @@ if (!token_ok) {
 # Helper functions
 # --------------------------------------------------------------------------
 
-spotify_retry <- function(fn, retries = 5, sleep_seq = c(1, 2, 3, 5, 8)) {
-  last <- NULL
-  for (i in seq_len(retries)) {
-    res <- tryCatch(fn(), error = function(e) e)
-    if (!inherits(res, "error")) return(res)
-    last <- res
-    # Refresh token occasionally
-    try({ access_token <- get_spotify_access_token() }, silent = TRUE)
-    Sys.sleep(sleep_seq[min(i, length(sleep_seq))])
-  }
-  stop(last)
-}
-
 get_or_find_artist_id <- function(name_hint, id_hint) {
   if (!is.null(id_hint) && nzchar(id_hint)) return(id_hint)
   res <- tryCatch(search_spotify(name_hint, type = "artist", limit = 1), error = function(e) NULL)
   if (is.null(res) || nrow(res) == 0) stop("Could not find artist id for ", name_hint)
   res$id[1]
-}
-
-safe_get_artist_audio_features <- function(artist_id) {
-  out <- data.frame()
-  tryCatch({
-    # 1) Try top tracks first (lightweight; often avoids 403s)
-    tt <- tryCatch(spotify_retry(function() spotifyr::get_artist_top_tracks(artist_id, market = "US")), error = function(e) data.frame())
-    if (!is.null(tt) && nrow(tt) > 0) {
-      keep_cols <- intersect(c("id","name"), names(tt))
-      tt_keep <- tt[, keep_cols, drop = FALSE]
-      names(tt_keep)[names(tt_keep) == "id"] <- "track_id"
-      names(tt_keep)[names(tt_keep) == "name"] <- "track_name"
-      ids <- tt_keep$track_id
-      # Fetch audio features one-by-one to avoid sporadic 403s on batch endpoint
-      feats_list <- list()
-      for (tid in ids) {
-        af <- tryCatch(spotify_retry(function() spotifyr::get_track_audio_features(tid)), error = function(e) data.frame())
-        if (!is.null(af) && nrow(af) > 0) feats_list[[length(feats_list) + 1]] <- af
-        Sys.sleep(0.15)
-      }
-      feats <- if (length(feats_list) > 0) dplyr::bind_rows(feats_list) else data.frame()
-      if (nrow(feats) > 0) {
-        names(feats)[names(feats) == "id"] <- "track_id"
-        out <- dplyr::left_join(tt_keep, feats, by = "track_id")
-        out$artist_id <- artist_id
-      }
-    }
-    # 2) If still empty, paginate albums and collect features
-    if (nrow(out) == 0) {
-      include_groups <- c("album","single","compilation","appears_on")
-      all_albums <- data.frame()
-      for (off in c(0, 50, 100, 150)) {
-        al <- tryCatch(spotify_retry(function() spotifyr::get_artist_albums(artist_id, include_groups = include_groups, market = "US", limit = 50, offset = off)), error = function(e) data.frame())
-        if (nrow(al) == 0) break
-        all_albums <- dplyr::bind_rows(all_albums, al)
-        if (nrow(al) < 50) break
-        Sys.sleep(0.3)
-      }
-      if (nrow(all_albums) == 0) return(out)
-      album_ids <- unique(all_albums$id)
-
-      track_meta <- data.frame()
-      for (aid in album_ids) {
-        tr <- tryCatch(spotify_retry(function() spotifyr::get_album_tracks(aid, market = "US")), error = function(e) data.frame())
-        if (nrow(tr) == 0) next
-        keep_cols <- intersect(c("id","name"), names(tr))
-        tr_keep <- tr[, keep_cols, drop = FALSE]
-        names(tr_keep)[names(tr_keep) == "id"] <- "track_id"
-        names(tr_keep)[names(tr_keep) == "name"] <- "track_name"
-        track_meta <- dplyr::bind_rows(track_meta, tr_keep)
-        Sys.sleep(0.1)
-      }
-      track_meta <- track_meta[!duplicated(track_meta$track_id) & !is.na(track_meta$track_id), , drop = FALSE]
-      if (nrow(track_meta) == 0) return(out)
-
-      ids <- track_meta$track_id
-      # One-by-one features to minimize 403s
-      feats <- data.frame()
-      for (tid in ids) {
-        af <- tryCatch(spotify_retry(function() spotifyr::get_track_audio_features(tid)), error = function(e) data.frame())
-        if (nrow(af) > 0) feats <- dplyr::bind_rows(feats, af)
-        Sys.sleep(0.15)
-      }
-      if (nrow(feats) == 0) return(out)
-      names(feats)[names(feats) == "id"] <- "track_id"
-      out <- dplyr::left_join(track_meta, feats, by = "track_id")
-      out$artist_id <- artist_id
-    }
-    out
-  }, error = function(e) data.frame())
-}
-
-safe_get_related_artists <- function(artist_id) {
-  tryCatch({
-    ra <- spotifyr::get_related_artists(artist_id)
-    # If empty or rate-limited, fallback to search by the main artist name to seed a few peers
-    if (is.null(ra) || nrow(ra) == 0) return(data.frame())
-    ra
-  }, error = function(e) data.frame())
 }
 
 numeric_feature_cols <- function(df) {
@@ -589,8 +497,111 @@ if (length(top2) == 2) {
   ggsave(paste(graph_dir, "q11_feature_scatter.png", sep = ""), p_scatter, width = 7, height = 5)
 }
 
+# Helper to compute ROC and AUC (no external deps)
+compute_roc <- function(labels, probs) {
+  y <- ifelse(as.character(labels) == "yes", 1L, 0L)
+  ord <- order(probs, decreasing = TRUE, na.last = NA)
+  y <- y[ord]
+  p <- probs[ord]
+  tp <- cumsum(y)
+  fp <- cumsum(1L - y)
+  P <- sum(y)
+  N <- length(y) - P
+  if (P == 0 || N == 0) return(list(df = data.frame(fpr = c(0,1), tpr = c(0,1)), auc = NA_real_))
+  tpr <- tp / P
+  fpr <- fp / N
+  df <- data.frame(fpr = c(0, fpr, 1), tpr = c(0, tpr, 1))
+  auc <- sum(diff(df$fpr) * (head(df$tpr, -1) + tail(df$tpr, -1)) / 2)
+  list(df = df, auc = auc)
+}
+
+# Helper to compute PR curve and AUPRC
+compute_pr <- function(labels, probs) {
+  y <- ifelse(as.character(labels) == "yes", 1L, 0L)
+  ord <- order(probs, decreasing = TRUE, na.last = NA)
+  y <- y[ord]
+  tp <- cumsum(y)
+  fp <- cumsum(1L - y)
+  P <- sum(y)
+  if (P == 0) return(list(df = data.frame(recall = c(0,1), precision = c(1,1)), aupr = NA_real_))
+  recall <- tp / P
+  precision <- tp / pmax(tp + fp, 1)
+  # prepend (0,1) point for nice plotting
+  df <- data.frame(recall = c(0, recall), precision = c(1, precision))
+  # approximate area under PR with trapezoid on recall
+  aupr <- sum(diff(df$recall) * (head(df$precision, -1) + tail(df$precision, -1)) / 2)
+  list(df = df, aupr = aupr)
+}
+
+# Probabilities for curves
+prob_yes_base <- tryCatch(predict(model_baseline, newdata = test_df, type = "prob")[, "yes"], error = function(e) rep(NA_real_, nrow(test_df)))
+prob_yes_boost <- tryCatch(predict(model_boost,   newdata = test_df, type = "prob")[, "yes"], error = function(e) rep(NA_real_, nrow(test_df)))
+
+roc_b <- compute_roc(test_df$by_artist, prob_yes_base)
+roc_bo <- compute_roc(test_df$by_artist, prob_yes_boost)
+pr_b <- compute_pr(test_df$by_artist, prob_yes_base)
+pr_bo <- compute_pr(test_df$by_artist, prob_yes_boost)
+
+# ROC plot
+roc_df <- rbind(
+  transform(roc_b$df, model = "Baseline"),
+  transform(roc_bo$df, model = "Boosted")
+)
+p_roc <- ggplot(roc_df, aes(x = fpr, y = tpr, color = model)) +
+  geom_line(size = 1) + geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray50") +
+  scale_color_manual(values = c("Baseline" = "#1f77b4", "Boosted" = "#d62728")) +
+  labs(title = sprintf("Q11 ROC (AUC: baseline=%.3f, boosted=%.3f)", roc_b$auc, roc_bo$auc), x = "False Positive Rate", y = "True Positive Rate", color = "Model") +
+  theme_minimal()
+ggsave(paste(graph_dir, "q11_roc.png", sep = ""), p_roc, width = 7, height = 5)
+
+# PR plot
+pr_df <- rbind(
+  transform(pr_b$df, model = "Baseline"),
+  transform(pr_bo$df, model = "Boosted")
+)
+p_pr <- ggplot(pr_df, aes(x = recall, y = precision, color = model)) +
+  geom_line(size = 1) +
+  scale_color_manual(values = c("Baseline" = "#1f77b4", "Boosted" = "#d62728")) +
+  labs(title = sprintf("Q11 Precision-Recall (AUPRC: baseline=%.3f, boosted=%.3f)", pr_b$aupr, pr_bo$aupr), x = "Recall", y = "Precision", color = "Model") +
+  theme_minimal()
+ggsave(paste(graph_dir, "q11_pr.png", sep = ""), p_pr, width = 7, height = 5)
+
+# Confusion matrix heatmaps
+cm_to_df <- function(cm) {
+  df <- as.data.frame(cm)
+  names(df) <- c("Predicted", "Actual", "Freq")
+  df
+}
+p_cm <- function(df, title) {
+  ggplot(df, aes(x = Actual, y = Predicted, fill = Freq)) +
+    geom_tile() + geom_text(aes(label = Freq), color = "white", fontface = "bold") +
+    scale_fill_gradient(low = "#6baed6", high = "#08306b") +
+    labs(title = title, x = "Actual", y = "Predicted") +
+    theme_minimal()
+}
+ggsave(paste(graph_dir, "q11_cm_baseline.png", sep = ""), p_cm(cm_to_df(cm_base), "Q11 Confusion Matrix - Baseline"), width = 5, height = 4)
+ggsave(paste(graph_dir, "q11_cm_boosted.png", sep = ""), p_cm(cm_to_df(cm_boost), "Q11 Confusion Matrix - Boosted"), width = 5, height = 4)
+
+# Feature distributions for top 3 numeric features by importance or fallback
+numeric_used <- intersect(feature_cols, names(test_df))
+top_num <- if (!is.null(imp) && nrow(imp) > 0) {
+  intersect(rownames(imp[order(-imp$Overall), , drop = FALSE]), numeric_used)[1:min(3, length(numeric_used))]
+} else {
+  head(numeric_used, 3)
+}
+if (length(top_num) > 0) {
+  dist_long <- tidyr::pivot_longer(cbind(test_df[, c(top_num, "by_artist")]), cols = all_of(top_num), names_to = "feature", values_to = "value")
+  p_dist <- ggplot(dist_long, aes(x = by_artist, y = value, fill = by_artist)) +
+    geom_violin(trim = TRUE, alpha = 0.6) +
+    geom_boxplot(width = 0.2, outlier.size = 0.5, alpha = 0.7) +
+    facet_wrap(~ feature, scales = "free_y") +
+    scale_fill_manual(values = c("no" = "#999999", "yes" = "#d62728")) +
+    labs(title = "Q11: Feature distributions by class (test set)", x = "Class", y = "Value", fill = "Class") +
+    theme_minimal()
+  ggsave(paste(graph_dir, "q11_feature_distributions.png", sep = ""), p_dist, width = 9, height = 5)
+}
 # --------------------------------------------------------------------------
-# Notes for report (printed; data and plots saved to disk)
+# Notes for report
 # --------------------------------------------------------------------------
 
 cat("\nNotes:\n")
