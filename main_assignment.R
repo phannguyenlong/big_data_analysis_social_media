@@ -106,9 +106,16 @@ source("./q9_community_analysis.R")
 # ============================================================================
 source("./q10_sentiment_analysis.R")
 
-save.image(file = "env_backup.RData")
+save.image(file = ".//backups//env_backup.RData")
 
 # ============================================================================
 # QUESTION 11: Build a decision tree and evaluate its performance in predicting whether a song is by your artist/band.
 # ============================================================================
 source("./q11_decision_tree.R")
+
+save.image(file = ".//backups//q11_env_backup.RData")
+
+# ============================================================================
+# QUESTION 12: LDA topic modelling to identify some terms that are closely related to your artist/band.
+# ============================================================================
+source("./q12_LDA_modelling.R")
