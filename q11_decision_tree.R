@@ -147,9 +147,10 @@ safe_get_related_artists <- function(artist_id) {
 }
 
 numeric_feature_cols <- function(df) {
-  # Minimal robust metadata features without audio features
+  # Minimal, realistic, low-NA numeric features
   wanted <- c(
-    "duration_ms","track_number","disc_number","album_year"
+    "duration_ms","track_number","disc_number","album_year",
+    "title_length","title_word_count","disc_track_ratio"
   )
   intersect(wanted, names(df))
 }
@@ -178,6 +179,33 @@ clean_feature_frame <- function(df, label_value) {
 }
 
 ## (Reverted) Removed enrichment helpers to keep minimal feature set
+
+# Add realistic, low-NA derived features from existing metadata
+add_realistic_features <- function(df) {
+  if (is.null(df) || nrow(df) == 0) return(df)
+  # Title-based features
+  title <- as.character(df$track_name)
+  title[is.na(title)] <- ""
+  title_norm <- trimws(gsub("\\s+", " ", title))
+  df$title_length <- nchar(title_norm)
+  df$title_word_count <- if (length(title_norm) > 0) sapply(strsplit(title_norm, " "), length) else integer(0)
+  ttl <- tolower(title_norm)
+  df$has_feat <- factor(ifelse(grepl("(^|[\\s\\(\\[])(feat\\.?|featuring)([\\s\\)\\]:]|$)", ttl), "yes", "no"), levels = c("no","yes"))
+  df$has_remix <- factor(ifelse(grepl("remix", ttl), "yes", "no"), levels = c("no","yes"))
+  df$has_live <- factor(ifelse(grepl("\\blive\\b", ttl), "yes", "no"), levels = c("no","yes"))
+  df$has_acoustic <- factor(ifelse(grepl("acoustic", ttl), "yes", "no"), levels = c("no","yes"))
+  # Decade from album_year
+  if ("album_year" %in% names(df)) {
+    yr <- suppressWarnings(as.integer(df$album_year))
+    decade_start <- ifelse(is.na(yr), NA_integer_, (yr %/% 10) * 10)
+    df$decade <- factor(ifelse(is.na(decade_start), NA_character_, paste0(decade_start, "s")))
+  }
+  # Ratio feature
+  dn <- suppressWarnings(as.integer(df$disc_number)); dn[is.na(dn) | dn <= 0] <- 1L
+  tn <- suppressWarnings(as.integer(df$track_number)); tn[is.na(tn) | tn <= 0] <- 1L
+  df$disc_track_ratio <- as.numeric(tn) / pmax(as.numeric(dn), 1)
+  df
+}
 
 # Process top-tracks data.frame into feature frame
 process_top_tracks <- function(tracks_df, artist_id) {
@@ -357,6 +385,7 @@ pos_search <- safe_search_tracks_for_artist(main_artist_id, ARTIST_NAME, max_tra
 pos_meta <- suppressWarnings(dplyr::bind_rows(pos_album, pos_top, pos_search))
 pos_meta <- pos_meta[!duplicated(pos_meta$track_id), , drop = FALSE]
 pos_df <- clean_feature_frame(pos_meta, label_value = TRUE)
+pos_df <- add_realistic_features(pos_df)
 if (is.finite(MAX_POS) && nrow(pos_df) > MAX_POS) {
   pos_df <- pos_df[sample(seq_len(nrow(pos_df)), MAX_POS), , drop = FALSE]
 }
@@ -365,6 +394,7 @@ cat("\n[Q11] Collected POS tracks:", nrow(pos_df), " (album:", nrow(pos_album), 
 # Negative class: general tracks from Spotify search excluding the main artist
 neg_meta <- safe_search_tracks_metadata(exclude_artist_id = main_artist_id, year_range = c(2006, 2024), max_tracks = 3000)
 neg_df <- clean_feature_frame(neg_meta, label_value = FALSE)
+neg_df <- add_realistic_features(neg_df)
 cat("[Q11] Collected NEG tracks:", nrow(neg_df), " (general search, artist excluded)\n")
 
 # Balance classes (downsample to the smaller class)
@@ -403,7 +433,8 @@ print(utils::head(all_df[, c("track_name", "by_artist", numeric_feature_cols(all
 # --------------------------------------------------------------------------
 
 feature_cols <- numeric_feature_cols(all_df)
-model_df <- all_df[, c(feature_cols, "by_artist"), drop = FALSE]
+categorical_cols <- intersect(c("explicit","has_feat","has_remix","has_live","has_acoustic","decade"), names(all_df))
+model_df <- all_df[, c(feature_cols, categorical_cols, "by_artist"), drop = FALSE]
 
 # Simple split 80/20 with class distribution logs and CSV exports
 n <- nrow(model_df)
