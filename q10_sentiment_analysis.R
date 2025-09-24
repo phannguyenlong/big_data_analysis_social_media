@@ -6,6 +6,10 @@
 if (!exists("dataset_dir")) dataset_dir <- ".//data//"
 if (!exists("graph_dir")) graph_dir <- ".//graphs//"
 if (!dir.exists(graph_dir)) dir.create(graph_dir, recursive = TRUE, showWarnings = FALSE)
+images_base_dir <- ".//images//"
+q10_img_dir <- file.path(images_base_dir, "q10")
+if (!dir.exists(images_base_dir)) dir.create(images_base_dir, recursive = TRUE, showWarnings = FALSE)
+if (!dir.exists(q10_img_dir)) dir.create(q10_img_dir, recursive = TRUE, showWarnings = FALSE)
 
 library(dplyr)
 library(tidyr)
@@ -86,6 +90,7 @@ p1 <- ggplot(sent_summary, aes(x = platform, y = share, fill = sentiment)) +
   labs(title = "Sentiment Distribution by Platform", x = "", y = "Share") +
   theme_minimal()
 ggsave(paste(graph_dir, "q10_sentiment_distribution.png", sep = ""), p1, width = 8, height = 5)
+ggsave(file.path(q10_img_dir, "q10_sentiment_distribution.png"), p1, width = 8, height = 5)
 
 # 2) Emotion proportions per platform
 p2 <- ggplot(emo_summary, aes(x = reorder(emotion, -proportion), y = proportion, fill = platform)) +
@@ -96,6 +101,7 @@ p2 <- ggplot(emo_summary, aes(x = reorder(emotion, -proportion), y = proportion,
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ggsave(paste(graph_dir, "q10_emotions_platform.png", sep = ""), p2, width = 9, height = 5)
+ggsave(file.path(q10_img_dir, "q10_emotions_platform.png"), p2, width = 9, height = 5)
 
 # 3) AFINN score distribution per platform
 p3 <- ggplot(all_df, aes(x = afinn, fill = platform)) +
@@ -104,6 +110,7 @@ p3 <- ggplot(all_df, aes(x = afinn, fill = platform)) +
   labs(title = "AFINN Sentiment Score Distribution", x = "AFINN score", y = "Density") +
   theme_minimal()
 ggsave(paste(graph_dir, "q10_afinn_density.png", sep = ""), p3, width = 8, height = 5)
+ggsave(file.path(q10_img_dir, "q10_afinn_density.png"), p3, width = 8, height = 5)
 
 # 4) Top contributing words per platform (positive vs negative)
 top_words <- all_contrib |>
@@ -118,6 +125,7 @@ p4 <- ggplot(top_words, aes(x = reorder(word, n), y = n, fill = sentiment)) +
   labs(title = "Top Sentiment-Contributing Words by Platform", x = "Word", y = "Count") +
   theme_minimal()
 ggsave(paste(graph_dir, "q10_top_words.png", sep = ""), p4, width = 10, height = 7)
+ggsave(file.path(q10_img_dir, "q10_top_words.png"), p4, width = 10, height = 7)
 
 # --------------------
 # Console summary

@@ -8,6 +8,10 @@ if (!exists("dataset_dir")) dataset_dir <- ".//data//"
 if (!exists("graph_dir")) graph_dir <- ".//graphs//"
 if (!dir.exists(dataset_dir)) dir.create(dataset_dir, recursive = TRUE, showWarnings = FALSE)
 if (!dir.exists(graph_dir)) dir.create(graph_dir, recursive = TRUE, showWarnings = FALSE)
+images_base_dir <- ".//images//"
+q12_img_dir <- file.path(images_base_dir, "q12")
+if (!dir.exists(images_base_dir)) dir.create(images_base_dir, recursive = TRUE, showWarnings = FALSE)
+if (!dir.exists(q12_img_dir)) dir.create(q12_img_dir, recursive = TRUE, showWarnings = FALSE)
 
 library(dplyr)
 library(tidyr)
@@ -100,6 +104,8 @@ top_terms_plot <- function(beta_df, title_text, out_path) {
     labs(title = title_text, x = "Beta (word probability)", y = "Term") +
     theme_minimal()
   ggsave(out_path, p, width = 10, height = 6)
+  # Also save to images/q12
+  ggsave(file.path(q12_img_dir, basename(out_path)), p, width = 10, height = 6)
   invisible(top_terms)
 }
 

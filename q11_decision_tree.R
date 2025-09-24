@@ -14,6 +14,12 @@ if (!dir.exists(graph_dir)) dir.create(graph_dir, recursive = TRUE, showWarnings
 if (!exists("ARTIST_NAME")) ARTIST_NAME <- "Taylor Swift"
 if (!exists("SPOTIFY_ARTIST_ID")) SPOTIFY_ARTIST_ID <- ""
 
+# Images directories (by question)
+images_base_dir <- ".//images//"
+q11_img_dir <- file.path(images_base_dir, "q11")
+if (!dir.exists(images_base_dir)) dir.create(images_base_dir, recursive = TRUE, showWarnings = FALSE)
+if (!dir.exists(q11_img_dir)) dir.create(q11_img_dir, recursive = TRUE, showWarnings = FALSE)
+
 suppressWarnings({
   library(spotifyr)
   library(dplyr)
@@ -399,6 +405,51 @@ rec_boost <- tryCatch(
 f1_boost <- if (is.na(prec_boost) || is.na(rec_boost) || (prec_boost + rec_boost) == 0) NA_real_ else 2 * (prec_boost * rec_boost) / (prec_boost + rec_boost)
 
 # --------------------------------------------------------------------------
+# Enhanced model via caret (e.g., logistic regression with CV)
+# --------------------------------------------------------------------------
+
+has_caret <- requireNamespace("caret", quietly = TRUE)
+acc_caret <- prec_caret <- rec_caret <- f1_caret <- NA_real_
+pred_caret <- NULL
+prob_caret <- NULL
+cm_caret <- NULL
+if (has_caret) {
+  # Use caret with ROC metric and repeated CV; choose a lightweight, reliable model
+  library(caret)
+  # Ensure positive class is 'yes'
+  train_df$by_artist <- stats::relevel(train_df$by_artist, ref = "yes")
+  test_df$by_artist  <- stats::relevel(test_df$by_artist,  ref = "yes")
+
+  ctrl <- caret::trainControl(method = "repeatedcv",
+                              number = 5, repeats = 2,
+                              classProbs = TRUE,
+                              summaryFunction = caret::twoClassSummary,
+                              savePredictions = "final",
+                              allowParallel = TRUE)
+
+  # Logistic regression (glm) with centering/scaling for stability
+  model_caret <- caret::train(by_artist ~ .,
+                              data = train_df,
+                              method = "glm",
+                              family = binomial(),
+                              metric = "ROC",
+                              trControl = ctrl,
+                              preProcess = c("center", "scale"))
+
+  pred_caret <- predict(model_caret, newdata = test_df)
+  pr_c <- tryCatch(predict(model_caret, newdata = test_df, type = "prob"), error = function(e) NULL)
+  prob_caret <- if (!is.null(pr_c) && "yes" %in% colnames(pr_c)) pr_c[, "yes"] else rep(NA_real_, nrow(test_df))
+
+  cm_caret <- table(Predicted = pred_caret, Actual = test_df$by_artist)
+  acc_caret <- mean(pred_caret == test_df$by_artist)
+  prec_caret <- tryCatch(cm_caret["yes","yes"] / sum(cm_caret["yes", ]), error = function(e) NA_real_)
+  rec_caret  <- tryCatch(cm_caret["yes","yes"] / sum(cm_caret[ ,"yes"]), error = function(e) NA_real_)
+  f1_caret   <- if (is.na(prec_caret) || is.na(rec_caret) || (prec_caret + rec_caret) == 0) NA_real_ else 2 * (prec_caret * rec_caret) / (prec_caret + rec_caret)
+} else {
+  cat("[Q11] caret not available; skipping caret-enhanced model. Install 'caret' to enable.\n")
+}
+
+# --------------------------------------------------------------------------
 # Save evaluation artifacts
 # --------------------------------------------------------------------------
 
@@ -409,11 +460,11 @@ cm_out <- dplyr::bind_rows(cm_base_df, cm_boost_df)
 
 # Metrics summary (printed only; not saved to disk per request)
 eval_summary <- data.frame(
-  model = c("baseline","boosted"),
-  accuracy = c(acc_base, acc_boost),
-  precision_yes = c(prec_base, prec_boost),
-  recall_yes = c(rec_base, rec_boost),
-  f1_yes = c(f1_base, f1_boost),
+  model = c("baseline","boosted", if (has_caret) "caret_glm" else NULL),
+  accuracy = c(acc_base, acc_boost, if (has_caret) acc_caret else NULL),
+  precision_yes = c(prec_base, prec_boost, if (has_caret) prec_caret else NULL),
+  recall_yes = c(rec_base, rec_boost, if (has_caret) rec_caret else NULL),
+  f1_yes = c(f1_base, f1_boost, if (has_caret) f1_caret else NULL),
   stringsAsFactors = FALSE
 )
 
@@ -434,6 +485,24 @@ cat(sprintf("Accuracy: %.3f\n", acc_boost))
 if (!is.na(prec_boost)) cat(sprintf("Precision (yes): %.3f\n", prec_boost))
 if (!is.na(rec_boost))  cat(sprintf("Recall (yes): %.3f\n", rec_boost))
 if (!is.na(f1_boost))   cat(sprintf("F1 (yes): %.3f\n", f1_boost))
+
+if (has_caret) {
+  cat("\n[Q11] -- Caret (glm with CV) confusion matrix --\n")
+  print(cm_caret)
+  cat(sprintf("Accuracy: %.3f\n", acc_caret))
+  if (!is.na(prec_caret)) cat(sprintf("Precision (yes): %.3f\n", prec_caret))
+  if (!is.na(rec_caret))  cat(sprintf("Recall (yes): %.3f\n", rec_caret))
+  if (!is.na(f1_caret))   cat(sprintf("F1 (yes): %.3f\n", f1_caret))
+  # Print top coefficients by absolute magnitude (feature influence proxy)
+  co <- tryCatch(summary(model_caret$finalModel)$coefficients, error = function(e) NULL)
+  if (!is.null(co)) {
+    co_df <- data.frame(term = rownames(co), estimate = co[,1], stringsAsFactors = FALSE)
+    co_df <- co_df[co_df$term != "(Intercept)", , drop = FALSE]
+    co_df$abs_est <- abs(co_df$estimate)
+    co_top <- utils::head(co_df[order(-co_df$abs_est), c("term","estimate")], 10)
+    cat("[Q11] Caret (glm) top coefficients by |estimate|:\n"); print(co_top)
+  }
+}
 
 # Build full prediction tables and save to train_data
 test_indices <- setdiff(seq_len(nrow(model_df)), idx)
@@ -459,10 +528,25 @@ predictions_boosted <- data.frame(
 )
 utils::write.csv(predictions_baseline, file = file.path(train_dir, "predictions_baseline.csv"), row.names = FALSE)
 utils::write.csv(predictions_boosted,  file = file.path(train_dir, "predictions_boosted.csv"),  row.names = FALSE)
+if (has_caret) {
+  predictions_caret <- data.frame(
+    track_id = test_meta$track_id,
+    track_name = test_meta$track_name,
+    actual = test_df$by_artist,
+    predicted = pred_caret,
+    prob_yes = prob_caret,
+    stringsAsFactors = FALSE
+  )
+  utils::write.csv(predictions_caret,  file = file.path(train_dir, "predictions_caret_glm.csv"),  row.names = FALSE)
+}
 
 # Show a small table of predictions vs actuals (first 12)
 cat("\n[Q11] Sample predictions (boosted) -- first 12:\n")
 print(utils::head(predictions_boosted, 12))
+if (has_caret) {
+  cat("\n[Q11] Sample predictions (caret glm) -- first 12:\n")
+  print(utils::head(predictions_caret, 12))
+}
 
 # --------------------------------------------------------------------------
 # Visualizations: variable importance and 2D scatter of top features
@@ -482,6 +566,7 @@ if (!is.null(imp) && nrow(imp) > 0) {
     labs(title = paste0("Q11: Feature Importance (", ARTIST_NAME, ")"), x = "Feature", y = "Importance (usage)") +
     theme_minimal()
   ggsave(paste(graph_dir, "q11_feature_importance.png", sep = ""), p_imp, width = 8, height = 5)
+  ggsave(file.path(q11_img_dir, "q11_feature_importance.png"), p_imp, width = 8, height = 5)
 }
 
 # 2D scatter: top two features if available
@@ -495,6 +580,7 @@ if (length(top2) == 2) {
     labs(title = paste0("Q11: Test set scatter (", top2[1], " vs ", top2[2], ")"), color = "By Artist") +
     theme_minimal()
   ggsave(paste(graph_dir, "q11_feature_scatter.png", sep = ""), p_scatter, width = 7, height = 5)
+  ggsave(file.path(q11_img_dir, "q11_feature_scatter.png"), p_scatter, width = 7, height = 5)
 }
 
 # Helper to compute ROC and AUC (no external deps)
@@ -536,6 +622,7 @@ compute_pr <- function(labels, probs) {
 # Probabilities for curves
 prob_yes_base <- tryCatch(predict(model_baseline, newdata = test_df, type = "prob")[, "yes"], error = function(e) rep(NA_real_, nrow(test_df)))
 prob_yes_boost <- tryCatch(predict(model_boost,   newdata = test_df, type = "prob")[, "yes"], error = function(e) rep(NA_real_, nrow(test_df)))
+prob_yes_caret <- if (has_caret) prob_caret else rep(NA_real_, nrow(test_df))
 
 roc_b <- compute_roc(test_df$by_artist, prob_yes_base)
 roc_bo <- compute_roc(test_df$by_artist, prob_yes_boost)
@@ -543,28 +630,34 @@ pr_b <- compute_pr(test_df$by_artist, prob_yes_base)
 pr_bo <- compute_pr(test_df$by_artist, prob_yes_boost)
 
 # ROC plot
+roc_c <- if (has_caret) compute_roc(test_df$by_artist, prob_yes_caret) else NULL
 roc_df <- rbind(
   transform(roc_b$df, model = "Baseline"),
-  transform(roc_bo$df, model = "Boosted")
+  transform(roc_bo$df, model = "Boosted"),
+  if (has_caret) transform(roc_c$df, model = "Caret (glm)") else NULL
 )
 p_roc <- ggplot(roc_df, aes(x = fpr, y = tpr, color = model)) +
   geom_line(size = 1) + geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray50") +
-  scale_color_manual(values = c("Baseline" = "#1f77b4", "Boosted" = "#d62728")) +
-  labs(title = sprintf("Q11 ROC (AUC: baseline=%.3f, boosted=%.3f)", roc_b$auc, roc_bo$auc), x = "False Positive Rate", y = "True Positive Rate", color = "Model") +
+  scale_color_manual(values = c("Baseline" = "#1f77b4", "Boosted" = "#d62728", "Caret (glm)" = "#2ca02c")) +
+  labs(title = sprintf("Q11 ROC (AUC: baseline=%.3f, boosted=%.3f%s)", roc_b$auc, roc_bo$auc, if (has_caret) paste0(", caret=", sprintf("%.3f", roc_c$auc)) else ""), x = "False Positive Rate", y = "True Positive Rate", color = "Model") +
   theme_minimal()
 ggsave(paste(graph_dir, "q11_roc.png", sep = ""), p_roc, width = 7, height = 5)
+ggsave(file.path(q11_img_dir, "q11_roc.png"), p_roc, width = 7, height = 5)
 
 # PR plot
+pr_c <- if (has_caret) compute_pr(test_df$by_artist, prob_yes_caret) else NULL
 pr_df <- rbind(
   transform(pr_b$df, model = "Baseline"),
-  transform(pr_bo$df, model = "Boosted")
+  transform(pr_bo$df, model = "Boosted"),
+  if (has_caret) transform(pr_c$df, model = "Caret (glm)") else NULL
 )
 p_pr <- ggplot(pr_df, aes(x = recall, y = precision, color = model)) +
   geom_line(size = 1) +
-  scale_color_manual(values = c("Baseline" = "#1f77b4", "Boosted" = "#d62728")) +
-  labs(title = sprintf("Q11 Precision-Recall (AUPRC: baseline=%.3f, boosted=%.3f)", pr_b$aupr, pr_bo$aupr), x = "Recall", y = "Precision", color = "Model") +
+  scale_color_manual(values = c("Baseline" = "#1f77b4", "Boosted" = "#d62728", "Caret (glm)" = "#2ca02c")) +
+  labs(title = sprintf("Q11 Precision-Recall (AUPRC: baseline=%.3f, boosted=%.3f%s)", pr_b$aupr, pr_bo$aupr, if (has_caret) paste0(", caret=", sprintf("%.3f", pr_c$aupr)) else ""), x = "Recall", y = "Precision", color = "Model") +
   theme_minimal()
 ggsave(paste(graph_dir, "q11_pr.png", sep = ""), p_pr, width = 7, height = 5)
+ggsave(file.path(q11_img_dir, "q11_pr.png"), p_pr, width = 7, height = 5)
 
 # Confusion matrix heatmaps
 cm_to_df <- function(cm) {
@@ -581,6 +674,12 @@ p_cm <- function(df, title) {
 }
 ggsave(paste(graph_dir, "q11_cm_baseline.png", sep = ""), p_cm(cm_to_df(cm_base), "Q11 Confusion Matrix - Baseline"), width = 5, height = 4)
 ggsave(paste(graph_dir, "q11_cm_boosted.png", sep = ""), p_cm(cm_to_df(cm_boost), "Q11 Confusion Matrix - Boosted"), width = 5, height = 4)
+ggsave(file.path(q11_img_dir, "q11_cm_baseline.png"), p_cm(cm_to_df(cm_base), "Q11 Confusion Matrix - Baseline"), width = 5, height = 4)
+ggsave(file.path(q11_img_dir, "q11_cm_boosted.png"), p_cm(cm_to_df(cm_boost), "Q11 Confusion Matrix - Boosted"), width = 5, height = 4)
+if (has_caret) {
+  ggsave(paste(graph_dir, "q11_cm_caret_glm.png", sep = ""), p_cm(cm_to_df(cm_caret), "Q11 Confusion Matrix - Caret (glm)"), width = 5, height = 4)
+  ggsave(file.path(q11_img_dir, "q11_cm_caret_glm.png"), p_cm(cm_to_df(cm_caret), "Q11 Confusion Matrix - Caret (glm)"), width = 5, height = 4)
+}
 
 # Feature distributions for top 3 numeric features by importance or fallback
 numeric_used <- intersect(feature_cols, names(test_df))
@@ -599,16 +698,22 @@ if (length(top_num) > 0) {
     labs(title = "Q11: Feature distributions by class (test set)", x = "Class", y = "Value", fill = "Class") +
     theme_minimal()
   ggsave(paste(graph_dir, "q11_feature_distributions.png", sep = ""), p_dist, width = 9, height = 5)
+  ggsave(file.path(q11_img_dir, "q11_feature_distributions.png"), p_dist, width = 9, height = 5)
 }
 # --------------------------------------------------------------------------
 # Notes for report
 # --------------------------------------------------------------------------
 
 cat("\nNotes:\n")
-cat("- Dataset: equal samples from target artist and related artists (comparison datasets).\n")
-cat("- Baseline: single C5.0 tree. Improved: boosted C5.0 (trials=10).\n")
-cat("- Outputs saved to data/: q11_tracks_features.csv, q11_confusion_matrix.csv, q11_eval_summary.csv\n")
-cat("- Plots saved to graphs/: q11_feature_importance.png, q11_feature_scatter.png\n")
+cat("- Dataset: equal samples from target artist and general tracks (balanced).\n")
+cat("- Models: baseline C5.0, boosted C5.0 (trials=10)")
+if (has_caret) cat(", and caret glm with CV")
+cat(".\n")
+cat("- Saved data to data/: q11_tracks_features.csv; splits in data/train_data/train_df.csv & test_df.csv.\n")
+cat("- Saved predictions to data/train_data/: predictions_baseline.csv, predictions_boosted.csv")
+if (has_caret) cat(", predictions_caret_glm.csv")
+cat(".\n")
+cat("- Saved plots to graphs/: q11_feature_importance.png, q11_feature_scatter.png, q11_roc.png, q11_pr.png, q11_cm_*.png.\n")
 
 # Print a concise summary report to terminal (no file save)
 report_lines <- c(
@@ -623,6 +728,7 @@ report_lines <- c(
   "Boosted (trials=10):",
   paste0("  Accuracy=", sprintf("%.3f", acc_boost), ", Precision_y=", sprintf("%.3f", prec_boost), ", Recall_y=", sprintf("%.3f", rec_boost), ", F1_y=", sprintf("%.3f", f1_boost)),
   "",
-  paste0("Predictions saved: ", file.path(train_dir, "predictions_baseline.csv"), "; ", file.path(train_dir, "predictions_boosted.csv"))
+  paste0("Predictions saved: ", file.path(train_dir, "predictions_baseline.csv"), "; ", file.path(train_dir, "predictions_boosted.csv"),
+         if (has_caret) paste0("; ", file.path(train_dir, "predictions_caret_glm.csv")) else "")
 )
 cat(paste0(report_lines, collapse = "\n"), "\n")

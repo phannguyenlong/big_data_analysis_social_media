@@ -119,3 +119,4 @@ save.image(file = ".//backups//q11_env_backup.RData")
 # QUESTION 12: LDA topic modelling to identify some terms that are closely related to your artist/band.
 # ============================================================================
 source("./q12_LDA_modelling.R")
+save.image(file = ".//backups//q12_env_backup.RData")
