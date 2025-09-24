@@ -22,10 +22,10 @@ suppressWarnings({
   library(C50)
 })
 
-set.seed(123)
+set.seed(1337)
 
 # --------------------------------------------------------------------------
-# Authenticate Spotify (expects SPOTIFY_CLIENT_ID/SECRET to be set in env)
+# Authenticate Spotify 
 # --------------------------------------------------------------------------
 
 # Refer to q5: source credentials from R variables into environment if available
@@ -40,7 +40,7 @@ try({
   token_ok <- TRUE
 }, silent = TRUE)
 if (!token_ok) {
-  stop("Spotify authentication failed. Refer to q5_sportify.R: set SPOTIFY_CLIENT_ID/SECRET (environment) or run main_assignment.R first.")
+  stop("Spotify authentication failed.")
 }
 
 # --------------------------------------------------------------------------
@@ -147,9 +147,9 @@ safe_get_related_artists <- function(artist_id) {
 }
 
 numeric_feature_cols <- function(df) {
-  # Use robust metadata features available without audio-features endpoint
+  # Minimal robust metadata features without audio features
   wanted <- c(
-    "duration_ms","popularity","track_number","disc_number","album_year"
+    "duration_ms","track_number","disc_number","album_year"
   )
   intersect(wanted, names(df))
 }
@@ -161,12 +161,23 @@ clean_feature_frame <- function(df, label_value) {
     df$explicit <- ifelse(isTRUE(df$explicit), "yes", "no")
     df$explicit <- factor(df$explicit, levels = c("no","yes"))
   }
+  # Fill some missing numeric metadata to avoid over-dropping rows
+  if (!("disc_number" %in% names(df))) df$disc_number <- NA_integer_
+  if (!("track_number" %in% names(df))) df$track_number <- NA_integer_
+  if (!("duration_ms" %in% names(df))) df$duration_ms <- NA_integer_
+  if (!("album_year" %in% names(df))) df$album_year <- NA_integer_
+
+  df$disc_number[is.na(df$disc_number)] <- 1L
+  df$track_number[is.na(df$track_number)] <- 1L
+  # Keep duration_ms and album_year as required
   cols <- unique(c("track_id","track_name","artist_name","artist_id","explicit", numeric_feature_cols(df)))
   df2 <- df[, cols[cols %in% names(df)], drop = FALSE]
   df2 <- df2[complete.cases(df2[, numeric_feature_cols(df2), drop = FALSE]), , drop = FALSE]
   df2$by_artist <- factor(ifelse(label_value, "yes", "no"), levels = c("no","yes"))
   df2
 }
+
+## (Reverted) Removed enrichment helpers to keep minimal feature set
 
 # Process top-tracks data.frame into feature frame
 process_top_tracks <- function(tracks_df, artist_id) {
@@ -187,6 +198,44 @@ safe_get_artist_top_tracks_metadata <- function(artist_id) {
   tryCatch({
     tt <- spotifyr::get_artist_top_tracks(artist_id, market = "US")
     process_top_tracks(tt, artist_id)
+  }, error = function(e) data.frame())
+}
+
+# Search tracks for a specific artist by name, then keep only rows that include the artist_id
+safe_search_tracks_for_artist <- function(artist_id, artist_name, max_tracks = 3000) {
+  out <- data.frame()
+  tryCatch({
+    # query by artist name; we will filter by artist_id to ensure correctness
+    q <- paste0('artist:"', artist_name, '"')
+    for (off in seq(0, 5000, by = 50)) {
+      tr <- tryCatch(spotifyr::search_spotify(q, type = "track", market = "US", limit = 50, offset = off), error = function(e) data.frame())
+      if (is.null(tr) || nrow(tr) == 0) break
+      # keep only tracks where artist_id appears in the artists list
+      keep_rows <- rep(FALSE, nrow(tr))
+      if ("artists" %in% names(tr)) {
+        for (i in seq_len(nrow(tr))) {
+          arts <- tryCatch(tr$artists[[i]], error = function(e) NULL)
+          if (is.data.frame(arts) && "id" %in% names(arts)) {
+            if (artist_id %in% as.character(arts$id)) keep_rows[i] <- TRUE
+          }
+        }
+      }
+      tr <- tr[keep_rows, , drop = FALSE]
+      if (nrow(tr) == 0) next
+      keep <- intersect(c("id","name","duration_ms","explicit","track_number","disc_number","album.release_date"), names(tr))
+      df <- tr[, keep, drop = FALSE]
+      names(df)[names(df) == "id"] <- "track_id"
+      names(df)[names(df) == "name"] <- "track_name"
+      if ("album.release_date" %in% names(df)) {
+        df$album_year <- suppressWarnings(as.integer(substr(as.character(df$"album.release_date"), 1, 4)))
+      }
+      df$artist_id <- artist_id
+      out <- dplyr::bind_rows(out, df)
+      if (nrow(out) >= max_tracks) break
+      Sys.sleep(0.15)
+    }
+    if (nrow(out) > 0) out <- out[!duplicated(out$track_id), , drop = FALSE]
+    out
   }, error = function(e) data.frame())
 }
 
@@ -222,14 +271,24 @@ safe_get_artist_album_tracks_metadata <- function(artist_id) {
     }
     if (nrow(all_albums) == 0) return(out)
     album_ids <- unique(all_albums$id)
+    # Build album -> release_date map for year derivation
+    album_year_map <- data.frame(
+      album_id = as.character(all_albums$id),
+      album_release_date = as.character(all_albums$release_date),
+      stringsAsFactors = FALSE
+    )
     acc <- data.frame()
     for (aid in album_ids) {
       tr <- tryCatch(spotifyr::get_album_tracks(aid, market = "US"), error = function(e) data.frame())
       if (nrow(tr) == 0) next
-      keep <- intersect(c("id","name","duration_ms","explicit","popularity","track_number","disc_number"), names(tr))
+      keep <- intersect(c("id","name","duration_ms","explicit","track_number","disc_number"), names(tr))
       df <- tr[, keep, drop = FALSE]
       names(df)[names(df) == "id"] <- "track_id"
       names(df)[names(df) == "name"] <- "track_name"
+      # attach album id and album year
+      df$album_id <- aid
+      rel <- album_year_map$album_release_date[match(aid, album_year_map$album_id)]
+      df$album_year <- suppressWarnings(as.integer(substr(as.character(rel), 1, 4)))
       df$artist_id <- artist_id
       acc <- dplyr::bind_rows(acc, df)
       Sys.sleep(0.1)
@@ -238,36 +297,77 @@ safe_get_artist_album_tracks_metadata <- function(artist_id) {
   }, error = function(e) data.frame())
 }
 
+# Search-wide tracks metadata (negatives) excluding the main artist
+safe_search_tracks_metadata <- function(exclude_artist_id, year_range = c(2006, 2024), max_tracks = 2000) {
+  out <- data.frame()
+  tryCatch({
+    start_year <- min(year_range, na.rm = TRUE)
+    end_year <- max(year_range, na.rm = TRUE)
+    q <- paste0("year:", start_year, "-", end_year)
+    collected <- 0
+    for (off in seq(0, 5000, by = 50)) {  # up to 5000 tracks attempted
+      tr <- tryCatch(spotifyr::search_spotify(q, type = "track", market = "US", limit = 50, offset = off), error = function(e) data.frame())
+      if (is.null(tr) || nrow(tr) == 0) break
+      # Filter out any rows where artist list contains exclude_artist_id
+      keep_rows <- rep(TRUE, nrow(tr))
+      if ("artists" %in% names(tr)) {
+        for (i in seq_len(nrow(tr))) {
+          arts <- tryCatch(tr$artists[[i]], error = function(e) NULL)
+          if (is.data.frame(arts) && "id" %in% names(arts)) {
+            if (exclude_artist_id %in% as.character(arts$id)) keep_rows[i] <- FALSE
+          }
+        }
+      }
+      tr <- tr[keep_rows, , drop = FALSE]
+      if (nrow(tr) == 0) next
+      keep <- intersect(c("id","name","duration_ms","explicit","track_number","disc_number","album.release_date"), names(tr))
+      df <- tr[, keep, drop = FALSE]
+      names(df)[names(df) == "id"] <- "track_id"
+      names(df)[names(df) == "name"] <- "track_name"
+      if ("album.release_date" %in% names(df)) {
+        df$album_year <- suppressWarnings(as.integer(substr(as.character(df$"album.release_date"), 1, 4)))
+      }
+      df$artist_id <- NA_character_
+      out <- dplyr::bind_rows(out, df)
+      collected <- nrow(out)
+      if (collected >= max_tracks) break
+      Sys.sleep(0.15)
+    }
+    # Deduplicate by track_id
+    if (nrow(out) > 0) out <- out[!duplicated(out$track_id), , drop = FALSE]
+    out
+  }, error = function(e) data.frame())
+}
+
 # --------------------------------------------------------------------------
-# Build dataset: target artist vs related artists (comparison datasets)
+# Build dataset: positive = your artist; negative = general tracks (not your artist)
 # --------------------------------------------------------------------------
 
 main_artist_id <- get_or_find_artist_id(ARTIST_NAME, SPOTIFY_ARTIST_ID)
 
-# Positive class: tracks by the target artist (metadata-only to avoid 403 on audio-features)
-pos_meta <- safe_get_artist_top_tracks_metadata(main_artist_id)
+# Config for dataset size
+NUM_RELATED <- 20            # number of related/collab artists to include
+MAX_POS <- Inf               # no cap on positive tracks
+MAX_NEG_PER_ARTIST <- 200    # higher cap per negative artist
+
+# Positive class: prefer album tracks to increase volume; fallback to top tracks and search
+pos_album <- safe_get_artist_album_tracks_metadata(main_artist_id)
+pos_top <- safe_get_artist_top_tracks_metadata(main_artist_id)
+pos_search <- safe_search_tracks_for_artist(main_artist_id, ARTIST_NAME, max_tracks = 3000)
+pos_meta <- suppressWarnings(dplyr::bind_rows(pos_album, pos_top, pos_search))
+pos_meta <- pos_meta[!duplicated(pos_meta$track_id), , drop = FALSE]
 pos_df <- clean_feature_frame(pos_meta, label_value = TRUE)
+if (is.finite(MAX_POS) && nrow(pos_df) > MAX_POS) {
+  pos_df <- pos_df[sample(seq_len(nrow(pos_df)), MAX_POS), , drop = FALSE]
+}
+cat("\n[Q11] Collected POS tracks:", nrow(pos_df), " (album:", nrow(pos_album), ", top:", nrow(pos_top), ", search:", nrow(pos_search), ")\n")
 
-# Negative class: tracks by related artists (top 5), metadata-only
-rel_df <- safe_get_related_artists(main_artist_id)
-rel_ids <- unique(utils::head(rel_df$id, 5))
-neg_list <- list()
-if (length(rel_ids) == 0) {
-  # If no related artists, extract collaborators from the main artist's top tracks and use their top tracks
-  main_tt <- tryCatch(spotifyr::get_artist_top_tracks(main_artist_id, market = "US"), error = function(e) data.frame())
-  collab_ids <- extract_artist_ids_from_tracks_df(main_tt, exclude_artist_id = main_artist_id)
-  rel_ids <- unique(utils::head(collab_ids, 5))
-}
-if (length(rel_ids) > 0) {
-  for (rid in rel_ids) {
-    neg_list[[length(neg_list) + 1]] <- safe_get_artist_top_tracks_metadata(rid)
-    Sys.sleep(0.2)
-  }
-}
-neg_meta <- dplyr::bind_rows(neg_list)
+# Negative class: general tracks from Spotify search excluding the main artist
+neg_meta <- safe_search_tracks_metadata(exclude_artist_id = main_artist_id, year_range = c(2006, 2024), max_tracks = 3000)
 neg_df <- clean_feature_frame(neg_meta, label_value = FALSE)
+cat("[Q11] Collected NEG tracks:", nrow(neg_df), " (general search, artist excluded)\n")
 
-# Balance classes
+# Balance classes (downsample to the smaller class)
 pos_df <- pos_df[!duplicated(pos_df$track_id), , drop = FALSE]
 neg_df <- neg_df[!duplicated(neg_df$track_id), , drop = FALSE]
 
@@ -277,11 +377,14 @@ pos_df <- pos_df[, unique(c("track_id","track_name","artist_name","artist_id", c
 neg_df <- neg_df[, unique(c("track_id","track_name","artist_name","artist_id", core_cols, "by_artist"))[unique(c("track_id","track_name","artist_name","artist_id", core_cols, "by_artist")) %in% names(neg_df)], drop = FALSE]
 
 n_min <- min(nrow(pos_df), nrow(neg_df))
+cat("[Q11] Pre-balance sizes -> POS:", nrow(pos_df), " NEG:", nrow(neg_df), " Balance target per class:", n_min, "\n")
 if (n_min < 10) stop("Insufficient data to train model (need >= 10 per class). Collected: ", nrow(pos_df), "/", nrow(neg_df))
 pos_df <- pos_df[sample(seq_len(nrow(pos_df)), n_min), , drop = FALSE]
 neg_df <- neg_df[sample(seq_len(nrow(neg_df)), n_min), , drop = FALSE]
+cat("[Q11] Post-balance sizes -> POS:", nrow(pos_df), " NEG:", nrow(neg_df), "\n")
 
 all_df <- suppressWarnings(dplyr::bind_rows(pos_df, neg_df))
+cat("[Q11] Combined dataset size:", nrow(all_df), "\n")
 
 # Save raw features for transparency
 utils::write.csv(all_df, paste(dataset_dir, "q11_tracks_features.csv", sep = ""), row.names = FALSE)
@@ -289,8 +392,9 @@ utils::write.csv(all_df, paste(dataset_dir, "q11_tracks_features.csv", sep = "")
 # Quick dataset summary (printed)
 cat("\n========== Q11 DATASET SUMMARY =========\n")
 cat("Artist:", ARTIST_NAME, "\n")
-cat("Positive (by artist):", nrow(pos_df), " | Negative (related/collab):", nrow(neg_df), " | Total:", nrow(all_df), "\n")
+cat("Positive (by artist):", nrow(pos_df), " | Negative (general):", nrow(neg_df), " | Total:", nrow(all_df), "\n")
 cat("Features used:", paste(numeric_feature_cols(all_df), collapse = ", "), "\n")
+cat("Class distribution (overall):\n"); print(table(all_df$by_artist))
 cat("Sample rows (first 8):\n")
 print(utils::head(all_df[, c("track_name", "by_artist", numeric_feature_cols(all_df)), drop = FALSE], 8))
 
@@ -301,11 +405,20 @@ print(utils::head(all_df[, c("track_name", "by_artist", numeric_feature_cols(all
 feature_cols <- numeric_feature_cols(all_df)
 model_df <- all_df[, c(feature_cols, "by_artist"), drop = FALSE]
 
-# Simple split 80/20
+# Simple split 80/20 with class distribution logs and CSV exports
 n <- nrow(model_df)
 idx <- sample(seq_len(n), size = floor(0.8 * n))
 train_df <- model_df[idx, , drop = FALSE]
 test_df  <- model_df[-idx, , drop = FALSE]
+cat("\n[Q11] Train/Test split -> Train:", nrow(train_df), " Test:", nrow(test_df), "\n")
+cat("[Q11] Train class distribution:\n"); print(table(train_df$by_artist))
+cat("[Q11] Test class distribution:\n"); print(table(test_df$by_artist))
+
+# Save split datasets
+train_dir <- file.path(dataset_dir, "train_data")
+if (!dir.exists(train_dir)) dir.create(train_dir, recursive = TRUE, showWarnings = FALSE)
+utils::write.csv(train_df, file = file.path(train_dir, "train_df.csv"), row.names = FALSE)
+utils::write.csv(test_df,  file = file.path(train_dir, "test_df.csv"),  row.names = FALSE)
 
 # --------------------------------------------------------------------------
 # Baseline C5.0 tree
@@ -350,15 +463,12 @@ f1_boost <- if (is.na(prec_boost) || is.na(rec_boost) || (prec_boost + rec_boost
 # Save evaluation artifacts
 # --------------------------------------------------------------------------
 
-# Confusion matrices
-cm_base_df <- as.data.frame.matrix(cm_base)
-cm_base_df$model <- "baseline"
-cm_boost_df <- as.data.frame.matrix(cm_boost)
-cm_boost_df$model <- "boosted"
+# Confusion matrices (printed only; not saved to disk per request)
+cm_base_df <- as.data.frame.matrix(cm_base); cm_base_df$model <- "baseline"
+cm_boost_df <- as.data.frame.matrix(cm_boost); cm_boost_df$model <- "boosted"
 cm_out <- dplyr::bind_rows(cm_base_df, cm_boost_df)
-utils::write.csv(cm_out, paste(dataset_dir, "q11_confusion_matrix.csv", sep = ""), row.names = TRUE)
 
-# Metrics summary
+# Metrics summary (printed only; not saved to disk per request)
 eval_summary <- data.frame(
   model = c("baseline","boosted"),
   accuracy = c(acc_base, acc_boost),
@@ -367,35 +477,53 @@ eval_summary <- data.frame(
   f1_yes = c(f1_base, f1_boost),
   stringsAsFactors = FALSE
 )
-utils::write.csv(eval_summary, paste(dataset_dir, "q11_eval_summary.csv", sep = ""), row.names = FALSE)
 
 cat("\n========== Q11 DECISION TREE SUMMARY =========\n")
 print(eval_summary)
 
 # Print confusion matrices and key metrics to console
-cat("\n-- Baseline (single tree) confusion matrix --\n")
+cat("\n[Q11] -- Baseline (single tree) confusion matrix --\n")
 print(cm_base)
 cat(sprintf("Accuracy: %.3f\n", acc_base))
 if (!is.na(prec_base)) cat(sprintf("Precision (yes): %.3f\n", prec_base))
 if (!is.na(rec_base))  cat(sprintf("Recall (yes): %.3f\n", rec_base))
 if (!is.na(f1_base))   cat(sprintf("F1 (yes): %.3f\n", f1_base))
 
-cat("\n-- Boosted (trials=10) confusion matrix --\n")
+cat("\n[Q11] -- Boosted (trials=10) confusion matrix --\n")
 print(cm_boost)
 cat(sprintf("Accuracy: %.3f\n", acc_boost))
 if (!is.na(prec_boost)) cat(sprintf("Precision (yes): %.3f\n", prec_boost))
 if (!is.na(rec_boost))  cat(sprintf("Recall (yes): %.3f\n", rec_boost))
 if (!is.na(f1_boost))   cat(sprintf("F1 (yes): %.3f\n", f1_boost))
 
-# Show a small table of predictions vs actuals (first 12)
-cat("\nSample predictions (boosted) -- first 12:\n")
-pred_preview <- data.frame(
-  track_name = utils::head(all_df[-idx, , drop = FALSE]$track_name, 12),
-  actual = utils::head(test_df$by_artist, 12),
-  predicted = utils::head(pred_boost, 12),
+# Build full prediction tables and save to train_data
+test_indices <- setdiff(seq_len(nrow(model_df)), idx)
+test_meta <- all_df[test_indices, , drop = FALSE]
+prob_base <- tryCatch(predict(model_baseline, newdata = test_df, type = "prob"), error = function(e) NULL)
+prob_boost <- tryCatch(predict(model_boost,   newdata = test_df, type = "prob"), error = function(e) NULL)
+
+predictions_baseline <- data.frame(
+  track_id = test_meta$track_id,
+  track_name = test_meta$track_name,
+  actual = test_df$by_artist,
+  predicted = pred_base,
+  prob_yes = if (!is.null(prob_base) && "yes" %in% colnames(prob_base)) prob_base[,"yes"] else NA_real_,
   stringsAsFactors = FALSE
 )
-print(pred_preview)
+predictions_boosted <- data.frame(
+  track_id = test_meta$track_id,
+  track_name = test_meta$track_name,
+  actual = test_df$by_artist,
+  predicted = pred_boost,
+  prob_yes = if (!is.null(prob_boost) && "yes" %in% colnames(prob_boost)) prob_boost[,"yes"] else NA_real_,
+  stringsAsFactors = FALSE
+)
+utils::write.csv(predictions_baseline, file = file.path(train_dir, "predictions_baseline.csv"), row.names = FALSE)
+utils::write.csv(predictions_boosted,  file = file.path(train_dir, "predictions_boosted.csv"),  row.names = FALSE)
+
+# Show a small table of predictions vs actuals (first 12)
+cat("\n[Q11] Sample predictions (boosted) -- first 12:\n")
+print(utils::head(predictions_boosted, 12))
 
 # --------------------------------------------------------------------------
 # Visualizations: variable importance and 2D scatter of top features
@@ -440,19 +568,19 @@ cat("- Baseline: single C5.0 tree. Improved: boosted C5.0 (trials=10).\n")
 cat("- Outputs saved to data/: q11_tracks_features.csv, q11_confusion_matrix.csv, q11_eval_summary.csv\n")
 cat("- Plots saved to graphs/: q11_feature_importance.png, q11_feature_scatter.png\n")
 
-# Also write a short text report summarizing outcomes
-report_path <- paste(dataset_dir, "q11_report.txt", sep = "")
+# Print a concise summary report to terminal (no file save)
 report_lines <- c(
   "Q11 Decision Tree Report",
   paste0("Artist: ", ARTIST_NAME),
-  paste0("Pos samples: ", nrow(pos_df), ", Neg samples: ", nrow(neg_df), ", Total: ", nrow(all_df)),
+  paste0("Pos samples (post-balance): ", nrow(pos_df), ", Neg samples: ", nrow(neg_df), ", Total: ", nrow(all_df)),
   paste0("Features used: ", paste(numeric_feature_cols(all_df), collapse = ", ")),
   "",
   "Baseline (single tree):",
   paste0("  Accuracy=", sprintf("%.3f", acc_base), ", Precision_y=", sprintf("%.3f", prec_base), ", Recall_y=", sprintf("%.3f", rec_base), ", F1_y=", sprintf("%.3f", f1_base)),
   "",
   "Boosted (trials=10):",
-  paste0("  Accuracy=", sprintf("%.3f", acc_boost), ", Precision_y=", sprintf("%.3f", prec_boost), ", Recall_y=", sprintf("%.3f", rec_boost), ", F1_y=", sprintf("%.3f", f1_boost))
+  paste0("  Accuracy=", sprintf("%.3f", acc_boost), ", Precision_y=", sprintf("%.3f", prec_boost), ", Recall_y=", sprintf("%.3f", rec_boost), ", F1_y=", sprintf("%.3f", f1_boost)),
+  "",
+  paste0("Predictions saved: ", file.path(train_dir, "predictions_baseline.csv"), "; ", file.path(train_dir, "predictions_boosted.csv"))
 )
-writeLines(report_lines, con = report_path)
-cat("Report written to: ", report_path, "\n", sep = "")
+cat(paste0(report_lines, collapse = "\n"), "\n")
