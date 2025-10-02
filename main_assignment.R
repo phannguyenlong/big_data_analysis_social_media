@@ -49,7 +49,6 @@ source("./utils.R")
 # ============================================================================
 
 source("./q2_data_collection.R")
-# do we need to remove N/A for this question
 
 # ============================================================================
 # QUESTION 3: Create actor network
@@ -120,3 +119,11 @@ save.image(file = ".//backups//q11_env_backup.RData")
 # ============================================================================
 source("./q12_LDA_modelling.R")
 save.image(file = ".//backups//q12_env_backup.RData")
+
+
+# =========================================
+# Export for powerBI
+# =========================================
+source("./export_powerbi.R")
+
+source("./export_powerbi2.R")
