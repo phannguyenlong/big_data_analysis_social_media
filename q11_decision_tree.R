@@ -28,10 +28,12 @@ suppressWarnings({
 
 set.seed(1337)
 
-cat("\n[Q11] Starting Reddit engagement modeling...\n")
-cat("[Q11] Output directories:\n  graphs  -> ", normalizePath(graph_dir, winslash = "/", mustWork = FALSE),
-    "\n  images  -> ", normalizePath(q11_img_dir, winslash = "/", mustWork = FALSE),
-    "\n  data    -> ", normalizePath(dataset_dir, winslash = "/", mustWork = FALSE), "\n", sep = "")
+cat("\n[Q11] ================================================================\n")
+cat("[Q11] Task: Reddit comment engagement (high vs low) — Decision Trees\n")
+cat("[Q11] Output directories (relative):\n  - graphs: ", graph_dir,
+    "\n  - images: ", q11_img_dir,
+    "\n  - data:   ", dataset_dir, "\n", sep = "")
+cat("[Q11] ================================================================\n\n")
 
 # --------------------------------------------------------------------------
 # Load Reddit data
@@ -40,15 +42,14 @@ cat("[Q11] Output directories:\n  graphs  -> ", normalizePath(graph_dir, winslas
 rd_rds <- paste(dataset_dir, "rd_data.rds", sep = "")
 if (!file.exists(rd_rds)) stop("Reddit dataset not found at ", rd_rds)
 rd_data <- readRDS(rd_rds)
-cat("[Q11] Loaded rd_data with rows:", nrow(rd_data), "\n")
+cat("[Q11] Loaded rd_data: ", nrow(rd_data), " rows\n", sep = "")
 
 # Keep essential columns and remove missing
 if (!all(c("comment","comment_score") %in% names(rd_data))) {
   stop("rd_data must contain 'comment' and 'comment_score' columns")
 }
-rd_data <- rd_data %>%
-  dplyr::filter(!is.na(comment), !is.na(comment_score))
-cat("[Q11] After NA filtering, rows:", nrow(rd_data), "\n")
+rd_data <- rd_data %>% dplyr::filter(!is.na(comment), !is.na(comment_score))
+cat("[Q11] After NA filtering: ", nrow(rd_data), " rows\n", sep = "")
 
 # --------------------------------------------------------------------------
 # Target and features
@@ -58,7 +59,7 @@ cat("[Q11] After NA filtering, rows:", nrow(rd_data), "\n")
 median_score <- stats::median(rd_data$comment_score, na.rm = TRUE)
 rd_data$engagement <- ifelse(rd_data$comment_score > median_score, "high", "low")
 rd_data$engagement <- factor(rd_data$engagement, levels = c("low","high"))
-cat("[Q11] Median comment_score:", median_score, "\n")
+cat("[Q11] Target threshold: median(comment_score) = ", median_score, "\n", sep = "")
 
 comment_text <- as.character(rd_data$comment)
 
@@ -88,10 +89,7 @@ base_df <- rd_data %>%
   dplyr::select(comment_preview, comment_length, has_link, time_hour, sentiment, engagement)
 
 # Enhanced features (simple metadata beyond lab)
-# - exclamation_count, question_count
-# - uppercase_ratio, word_count, unique_word_ratio
-# - link_count, mention_count (@), subreddit_ref_count ("r/")
-# - sentiment_abs (magnitude)
+#   + word_count, unique_word_ratio, punctuation/emphasis, casing, link/activity counts, sentiment magnitude
 text_upper_ratio <- function(x) {
   n <- nchar(x)
   ifelse(n > 0, sapply(gregexpr("[A-Z]", x), function(m) max(sum(m > 0), 0)) / n, 0)
@@ -158,14 +156,16 @@ test_enh_x  <- test_enh[,  setdiff(names(test_enh),  c("comment_preview")),  dro
 
 base_features <- c("comment_length","has_link","time_hour","sentiment")
 enhanced_features <- setdiff(names(train_enh_x), c("engagement"))
-cat("[Q11] Base features used:      ", paste(base_features, collapse = ", "), "\n", sep = "")
-cat("[Q11] Enhanced features used:  ", paste(enhanced_features, collapse = ", "), "\n", sep = "")
-cat("[Q11] Difference (enhanced adds): ", paste(setdiff(enhanced_features, base_features), collapse = ", "), "\n", sep = "")
 
-cat("[Q11] Train/Test sizes (base) ->", nrow(train_base), "/", nrow(test_base), "\n")
-cat("[Q11] Train/Test sizes (enhanced) ->", nrow(train_enh), "/", nrow(test_enh), "\n")
-cat("[Q11] Train class distribution (base):\n"); print(table(train_base$engagement))
-cat("[Q11] Test class distribution (base):\n"); print(table(test_base$engagement))
+cat("[Q11] Features (base):      ", paste(base_features, collapse = ", "), "\n", sep = "")
+cat("[Q11] Features (enhanced):  ", paste(enhanced_features, collapse = ", "), "\n", sep = "")
+cat("[Q11] Enhanced adds over base: ", paste(setdiff(enhanced_features, base_features), collapse = ", "), "\n", sep = "")
+
+cat("[Q11] Split sizes — base: ", nrow(train_base), "/", nrow(test_base), "; enhanced: ", nrow(train_enh), "/", nrow(test_enh), "\n", sep = "")
+train_tab <- table(train_base$engagement); test_tab <- table(test_base$engagement)
+train_pct <- round(100 * prop.table(train_tab), 1); test_pct <- round(100 * prop.table(test_tab), 1)
+cat("[Q11] Train distribution (base): ", paste(names(train_tab), train_tab, paste0("(", train_pct, "%)"), collapse = ", "), "\n", sep = "")
+cat("[Q11] Test  distribution (base): ", paste(names(test_tab),  test_tab,  paste0("(", test_pct,  "%)"), collapse = ", "), "\n", sep = "")
 
 # Save splits (base and enhanced)
 train_dir <- file.path(dataset_dir, "train_data")
@@ -174,14 +174,14 @@ utils::write.csv(train_base, file = file.path(train_dir, "train_df_base.csv"), r
 utils::write.csv(test_base,  file = file.path(train_dir, "test_df_base.csv"),  row.names = FALSE)
 utils::write.csv(train_enh,  file = file.path(train_dir, "train_df_enhanced.csv"), row.names = FALSE)
 utils::write.csv(test_enh,   file = file.path(train_dir, "test_df_enhanced.csv"),  row.names = FALSE)
-cat("[Q11] Saved train/test CSVs to ", normalizePath(train_dir, winslash = "/", mustWork = FALSE), "\n", sep = "")
+cat("[Q11] Saved splits: data/train_data/train_df_base.csv, test_df_base.csv, train_df_enhanced.csv, test_df_enhanced.csv\n")
 
 # --------------------------------------------------------------------------
 # Models
 # --------------------------------------------------------------------------
 
 # 1) Baseline C5.0 (base features)
-cat("[Q11] Training baseline C5.0 (base features)...\n")
+cat("\n[Q11] === Train: Baseline C5.0 (base features) ===\n")
 model_baseline <- C50::C5.0(engagement ~ comment_length + has_link + time_hour + sentiment, data = train_base)
 pred_base_test <- predict(model_baseline, newdata = test_base)
 cm_base <- table(Predicted = pred_base_test, Actual = test_base$engagement)
@@ -189,10 +189,11 @@ acc_base <- mean(pred_base_test == test_base$engagement)
 prec_base <- tryCatch(cm_base["high","high"] / sum(cm_base["high", ]), error = function(e) NA_real_)
 rec_base  <- tryCatch(cm_base["high","high"] / sum(cm_base[ ,"high"]), error = function(e) NA_real_)
 f1_base   <- if (is.na(prec_base) || is.na(rec_base) || (prec_base + rec_base) == 0) NA_real_ else 2 * (prec_base * rec_base) / (prec_base + rec_base)
-cat(sprintf("[Q11] Baseline -> Acc=%.3f, Prec(high)=%.3f, Rec(high)=%.3f, F1(high)=%.3f\n", acc_base, prec_base, rec_base, f1_base))
+cat(sprintf("[Q11] Metrics — Acc=%.3f, Prec(high)=%.3f, Rec(high)=%.3f, F1(high)=%.3f\n", acc_base, prec_base, rec_base, f1_base))
+cat("[Q11] Confusion matrix (baseline):\n"); print(cm_base)
 
 # 2) Boosted C5.0 (base features)
-cat("[Q11] Training boosted C5.0 (base features, trials=10)...\n")
+cat("\n[Q11] === Train: Boosted C5.0 (base features, trials=10) ===\n")
 model_boost_base <- C50::C5.0(engagement ~ comment_length + has_link + time_hour + sentiment, data = train_base, trials = 10)
 pred_boost_base_test <- predict(model_boost_base, newdata = test_base)
 cm_boost_base <- table(Predicted = pred_boost_base_test, Actual = test_base$engagement)
@@ -200,10 +201,11 @@ acc_boost_base <- mean(pred_boost_base_test == test_base$engagement)
 prec_boost_base <- tryCatch(cm_boost_base["high","high"] / sum(cm_boost_base["high", ]), error = function(e) NA_real_)
 rec_boost_base  <- tryCatch(cm_boost_base["high","high"] / sum(cm_boost_base[ ,"high"]), error = function(e) NA_real_)
 f1_boost_base   <- if (is.na(prec_boost_base) || is.na(rec_boost_base) || (prec_boost_base + rec_boost_base) == 0) NA_real_ else 2 * (prec_boost_base * rec_boost_base) / (prec_boost_base + rec_boost_base)
-cat(sprintf("[Q11] Boosted (base) -> Acc=%.3f, Prec(high)=%.3f, Rec(high)=%.3f, F1(high)=%.3f\n", acc_boost_base, prec_boost_base, rec_boost_base, f1_boost_base))
+cat(sprintf("[Q11] Metrics — Acc=%.3f, Prec(high)=%.3f, Rec(high)=%.3f, F1(high)=%.3f\n", acc_boost_base, prec_boost_base, rec_boost_base, f1_boost_base))
+cat("[Q11] Confusion matrix (boosted base):\n"); print(cm_boost_base)
 
 # 3) Boosted C5.0 (enhanced features)
-cat("[Q11] Training boosted C5.0 (enhanced features, trials=10)...\n")
+cat("\n[Q11] === Train: Boosted C5.0 (enhanced features, trials=10) ===\n")
 model_boost_enh <- C50::C5.0(engagement ~ ., data = train_enh_x, trials = 10)
 pred_boost_enh_test <- predict(model_boost_enh, newdata = test_enh_x)
 cm_boost_enh <- table(Predicted = pred_boost_enh_test, Actual = test_enh_x$engagement)
@@ -211,7 +213,8 @@ acc_boost_enh <- mean(pred_boost_enh_test == test_enh_x$engagement)
 prec_boost_enh <- tryCatch(cm_boost_enh["high","high"] / sum(cm_boost_enh["high", ]), error = function(e) NA_real_)
 rec_boost_enh  <- tryCatch(cm_boost_enh["high","high"] / sum(cm_boost_enh[ ,"high"]), error = function(e) NA_real_)
 f1_boost_enh   <- if (is.na(prec_boost_enh) || is.na(rec_boost_enh) || (prec_boost_enh + rec_boost_enh) == 0) NA_real_ else 2 * (prec_boost_enh * rec_boost_enh) / (prec_boost_enh + rec_boost_enh)
-cat(sprintf("[Q11] Boosted (enhanced) -> Acc=%.3f, Prec(high)=%.3f, Rec(high)=%.3f, F1(high)=%.3f\n", acc_boost_enh, prec_boost_enh, rec_boost_enh, f1_boost_enh))
+cat(sprintf("[Q11] Metrics — Acc=%.3f, Prec(high)=%.3f, Rec(high)=%.3f, F1(high)=%.3f\n", acc_boost_enh, prec_boost_enh, rec_boost_enh, f1_boost_enh))
+cat("[Q11] Confusion matrix (boosted enhanced):\n"); print(cm_boost_enh)
 
 # 4) caret GLM (base features)
 has_caret <- requireNamespace("caret", quietly = TRUE)
@@ -220,7 +223,7 @@ pred_caret_test <- NULL
 cm_caret <- NULL
 prob_caret_high <- NULL
 if (has_caret) {
-  cat("[Q11] Training caret GLM (base features)...\n")
+  cat("\n[Q11] === Train: caret GLM (base features) ===\n")
   library(caret)
   tb <- train_base; te <- test_base
   tb$engagement <- stats::relevel(tb$engagement, ref = "high")
@@ -239,9 +242,10 @@ if (has_caret) {
   prec_caret <- tryCatch(cm_caret["high","high"] / sum(cm_caret["high", ]), error = function(e) NA_real_)
   rec_caret  <- tryCatch(cm_caret["high","high"] / sum(cm_caret[ ,"high"]), error = function(e) NA_real_)
   f1_caret   <- if (is.na(prec_caret) || is.na(rec_caret) || (prec_caret + rec_caret) == 0) NA_real_ else 2 * (prec_caret * rec_caret) / (prec_caret + rec_caret)
-  cat(sprintf("[Q11] Caret GLM -> Acc=%.3f, Prec(high)=%.3f, Rec(high)=%.3f, F1(high)=%.3f\n", acc_caret, prec_caret, rec_caret, f1_caret))
+  cat(sprintf("[Q11] Metrics — Acc=%.3f, Prec(high)=%.3f, Rec(high)=%.3f, F1(high)=%.3f\n", acc_caret, prec_caret, rec_caret, f1_caret))
+  cat("[Q11] Confusion matrix (caret glm):\n"); print(cm_caret)
 } else {
-  cat("[Q11] caret not available; skipping caret GLM.\n")
+  cat("\n[Q11] caret not available; skipping caret GLM.\n")
 }
 
 # --------------------------------------------------------------------------
@@ -258,7 +262,7 @@ eval_summary <- data.frame(
 )
 utils::write.csv(eval_summary, paste(dataset_dir, "q11_eval_summary.csv", sep = ""), row.names = FALSE)
 
-cat("\n========== Q11: Reddit Engagement (High/Low) =========\n")
+cat("\n[Q11] === Evaluation Summary (also saved to data/q11_eval_summary.csv) ===\n")
 print(eval_summary)
 
 # --------------------------------------------------------------------------
@@ -284,7 +288,7 @@ prob_base_train_high <- if (!is.null(prob_base_train) && "high" %in% colnames(pr
 prob_boost_base_train_high <- if (!is.null(prob_boost_base_train) && "high" %in% colnames(prob_boost_base_train)) prob_boost_base_train[, "high"] else rep(NA_real_, nrow(train_base))
 prob_boost_enh_train_high <- if (!is.null(prob_boost_enh_train) && "high" %in% colnames(prob_boost_enh_train)) prob_boost_enh_train[, "high"] else rep(NA_real_, nrow(train_enh_x))
 
-# Build and save CSVs
+# Build and save CSVs (relative paths)
 predictions_baseline_test <- data.frame(
   comment_preview = test_base$comment_preview,
   actual = test_base$engagement,
@@ -350,10 +354,12 @@ if (has_caret) {
   utils::write.csv(predictions_caret_test, file = file.path(train_dir, "q11_predictions_test_caret_glm.csv"), row.names = FALSE)
 }
 
-cat("\n[Q11] Sample predictions (baseline) -- first 8:\n"); print(utils::head(predictions_baseline_test, 8))
-cat("\n[Q11] Sample predictions (boosted_base) -- first 8:\n");  print(utils::head(predictions_boosted_base_test, 8))
-cat("\n[Q11] Sample predictions (boosted_enh) -- first 8:\n");   print(utils::head(predictions_boosted_enh_test, 8))
-if (has_caret) { cat("\n[Q11] Sample predictions (caret glm) -- first 8:\n"); print(utils::head(predictions_caret_test, 8)) }
+cat("\n[Q11] Saved predictions (relative):\n  - data/train_data/q11_predictions_test_{baseline,boosted_base,boosted_enh,caret_glm}.csv\n  - data/train_data/q11_predictions_train_{baseline,boosted_base,boosted_enh}.csv\n")
+
+cat("\n[Q11] Sample predictions (baseline) — first 8 rows:\n"); print(utils::head(predictions_baseline_test, 8))
+cat("\n[Q11] Sample predictions (boosted_base) — first 8 rows:\n");  print(utils::head(predictions_boosted_base_test, 8))
+cat("\n[Q11] Sample predictions (boosted_enh) — first 8 rows:\n");   print(utils::head(predictions_boosted_enh_test, 8))
+if (has_caret) { cat("\n[Q11] Sample predictions (caret glm) — first 8 rows:\n"); print(utils::head(predictions_caret_test, 8)) }
 
 # --------------------------------------------------------------------------
 # Visualizations (confusion matrices + feature importance + ROC/PR)
@@ -478,13 +484,13 @@ ggsave(file.path(q11_img_dir, "q11_pr.png"), p_pr, width = 7, height = 5)
 # Final summary
 # --------------------------------------------------------------------------
 
-cat("\n[Q11] Improvement check (enhanced vs base boosted):\n")
-cat(sprintf("  F1:  %.3f (enhanced) vs %.3f (base) -> %+0.3f\n", f1_boost_enh, f1_boost_base, f1_boost_enh - f1_boost_base))
-cat(sprintf("  Acc: %.3f (enhanced) vs %.3f (base) -> %+0.3f\n", acc_boost_enh, acc_boost_base, acc_boost_enh - acc_boost_base))
-cat(sprintf("  Prec:%.3f (enhanced) vs %.3f (base) -> %+0.3f\n", prec_boost_enh, prec_boost_base, prec_boost_enh - prec_boost_base))
-cat(sprintf("  Rec: %.3f (enhanced) vs %.3f (base) -> %+0.3f\n", rec_boost_enh, rec_boost_base, rec_boost_enh - rec_boost_base))
+cat("\n[Q11] === Improvement check (enhanced vs base boosted) ===\n")
+cat(sprintf("  F1:  %.3f (enhanced) vs %.3f (base)  => %+0.3f\n", f1_boost_enh, f1_boost_base, f1_boost_enh - f1_boost_base))
+cat(sprintf("  Acc: %.3f (enhanced) vs %.3f (base)  => %+0.3f\n", acc_boost_enh, acc_boost_base, acc_boost_enh - acc_boost_base))
+cat(sprintf("  Prec:%.3f (enhanced) vs %.3f (base)  => %+0.3f\n", prec_boost_enh, prec_boost_base, prec_boost_enh - prec_boost_base))
+cat(sprintf("  Rec: %.3f (enhanced) vs %.3f (base)  => %+0.3f\n", rec_boost_enh, rec_boost_base, rec_boost_enh - rec_boost_base))
 
-# Better end-of-run summary including file outputs
+# Summarize generated files with relative paths
 generated_files <- list(
   splits = c(
     file.path(train_dir, "train_df_base.csv"),
@@ -522,12 +528,12 @@ generated_files <- list(
   )
 )
 
-cat("\n[Q11] Files generated:\n")
+cat("\n[Q11] Files generated (relative paths):\n")
 for (group in names(generated_files)) {
   cat("  ", group, ":\n", sep = "")
   files <- generated_files[[group]]
   files <- files[!is.na(files)]
-  for (f in files) cat("    - ", normalizePath(f, winslash = "/", mustWork = FALSE), "\n", sep = "")
+  for (f in files) cat("    - ", f, "\n", sep = "")
 }
 
-cat("\n[Q11] Artifacts saved to:\n  ", normalizePath(graph_dir, winslash = "/", mustWork = FALSE), "\n  ", normalizePath(q11_img_dir, winslash = "/", mustWork = FALSE), "\n  ", normalizePath(train_dir, winslash = "/", mustWork = FALSE), "\n", sep = "")
+cat("\n[Q11] Done. Key artifacts:\n  - Metrics: data/q11_eval_summary.csv\n  - Plots (graphs): q11_cm_*.png, q11_roc.png, q11_pr.png, q11_feature_importance_enhanced.png\n  - Plots (images): images/q11/*.png\n  - Predictions: data/train_data/q11_predictions_*.csv\n")
