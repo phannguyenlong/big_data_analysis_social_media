@@ -96,6 +96,7 @@ source("./q8_centrality_related.R")
 # QUESTION 9: community analysis with the Girvan-Newman (edge betweenness) and Louvain methods
 # ============================================================================
 source("./q9_community_analysis.R")
+source("./q9_community_related.R")
 
 
 #########################################################################
