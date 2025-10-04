@@ -88,7 +88,9 @@ source("./q7_sementic_bigram.R")
 # ============================================================================
 # QUESTION 8: degree centrality, betweenness centrality, and closeness centrality
 # ============================================================================
+source("./q8_build_second_artist.R")
 source("./q8_centrality.R")
+source("./q8_centrality_related.R")
 
 # ============================================================================
 # QUESTION 9: community analysis with the Girvan-Newman (edge betweenness) and Louvain methods
