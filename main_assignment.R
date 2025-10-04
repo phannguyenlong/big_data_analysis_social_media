@@ -125,8 +125,16 @@ save.image(file = ".//backups//q12_env_backup.RData")
 
 
 # =========================================
-# Export for powerBI
+# QUESTION 13: Export for powerBI
 # =========================================
 source("./export_powerbi.R")
 
 source("./export_powerbi2.R")
+
+
+# ============================================================================
+# QUESTION 14: New method
+# - Network: Infomap communities vs Louvain/Girvan–Newman
+# - ML: XGBoost engagement model vs C5.0/GLM (Q11)
+# ============================================================================
+source("./q14_new_methods.R")
